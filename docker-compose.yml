@@ -1,0 +1,239 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: nepal_sms_postgres
+    environment:
+      POSTGRES_DB: nepal_sms
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_INITDB_ARGS: "-E UTF8 --locale=en_US.UTF-8"
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - nepal_sms_network
+
+  # Redis Cache & Queue
+  redis:
+    image: redis:7-alpine
+    container_name: nepal_sms_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes --requirepass redis_password
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "redis_password", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - nepal_sms_network
+
+  # Backend Helper (for running scripts)
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: nepal_sms_backend
+    env_file:
+      - .env
+    environment:
+      - PYTHONPATH=/app
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/nepal_sms
+      - REDIS_URL=redis://:redis_password@redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+      - ./keys:/app/keys
+    working_dir: /app
+    networks:
+      - nepal_sms_network
+    profiles:
+      - tools
+    command: tail -f /dev/null
+
+  # Elasticsearch (Phase 3 - Optional for now)
+  # elasticsearch:
+  #   image: docker.elastic.co/elasticsearch/elasticsearch:8.15.0
+  #   container_name: nepal_sms_elasticsearch
+  #   environment:
+  #     - discovery.type=single-node
+  #     - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+  #     - xpack.security.enabled=false
+  #   ports:
+  #     - "9200:9200"
+  #   volumes:
+  #     - elasticsearch_data:/usr/share/elasticsearch/data
+  #   networks:
+  #     - nepal_sms_network
+
+  # RabbitMQ (Event Bus - Optional for Phase 2)
+  # rabbitmq:
+  #   image: rabbitmq:3.13-management-alpine
+  #   container_name: nepal_sms_rabbitmq
+  #   environment:
+  #     RABBITMQ_DEFAULT_USER: admin
+  #     RABBITMQ_DEFAULT_PASS: admin
+  #   ports:
+  #     - "5672:5672"
+  #     - "15672:15672"
+  #   volumes:
+  #     - rabbitmq_data:/var/lib/rabbitmq
+  #   networks:
+  #     - nepal_sms_network
+
+  # Auth Service
+  auth-service:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: nepal_sms_auth
+    env_file:
+      - .env
+    environment:
+      - PYTHONPATH=/app
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/nepal_sms
+      - REDIS_URL=redis://:redis_password@redis:6379/0
+    ports:
+      - "8001:8001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+      - ./keys:/app/keys:ro
+    command: python -m services.auth.main
+    networks:
+      - nepal_sms_network
+    restart: unless-stopped
+
+  # Tenant Service
+  tenant-service:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: nepal_sms_tenant
+    env_file:
+      - .env
+    environment:
+      - PYTHONPATH=/app
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/nepal_sms
+      - REDIS_URL=redis://:redis_password@redis:6379/0
+    ports:
+      - "8002:8002"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+    command: python -m services.tenant.main
+    networks:
+      - nepal_sms_network
+    restart: unless-stopped
+
+  # Calendar Service (BS/AD Conversion)
+  calendar-service:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: nepal_sms_calendar
+    env_file:
+      - .env
+    environment:
+      - PYTHONPATH=/app
+      - REDIS_URL=redis://:redis_password@redis:6379/0
+    ports:
+      - "8016:8016"
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+    command: python -m services.calendar.main
+    networks:
+      - nepal_sms_network
+    restart: unless-stopped
+
+  # Student Service
+  student-service:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: nepal_sms_student
+    env_file:
+      - .env
+    environment:
+      - PYTHONPATH=/app
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/nepal_sms
+      - REDIS_URL=redis://:redis_password@redis:6379/0
+    ports:
+      - "8003:8003"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+    command: python -m services.student.main
+    networks:
+      - nepal_sms_network
+    restart: unless-stopped
+
+  # Academic Service
+  academic-service:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: nepal_sms_academic
+    env_file:
+      - .env
+    environment:
+      - PYTHONPATH=/app
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/nepal_sms
+      - REDIS_URL=redis://:redis_password@redis:6379/0
+    ports:
+      - "8004:8004"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+    command: python -m services.academic.main
+    networks:
+      - nepal_sms_network
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  # elasticsearch_data:
+  #   driver: local
+  # rabbitmq_data:
+  #   driver: local
+
+networks:
+  nepal_sms_network:
+    driver: bridge
