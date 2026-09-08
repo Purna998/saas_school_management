@@ -1,4 +1,5 @@
 """Nepal School Management System - Report Service"""
+import asyncio
 import uuid
 import os
 import csv
@@ -35,8 +36,13 @@ class ReportService:
         await self.db.flush()
 
         try:
-            content = self._generate_csv_content(report_type, data)
-            file_path = self._save_report_file(report.id, content, report.file_format.value)
+            content = await asyncio.to_thread(self._generate_csv_content, report_type, data)
+            file_path = await asyncio.to_thread(
+                self._save_report_file,
+                report.id,
+                content,
+                report.file_format.value,
+            )
             report.file_url = file_path
             report.status = ReportStatus.READY
             report.generated_at = datetime.utcnow()
@@ -66,7 +72,7 @@ class ReportService:
     async def delete_report(self, report_id: uuid.UUID):
         report = await self.get_report(report_id)
         if report.file_url and os.path.exists(report.file_url):
-            os.remove(report.file_url)
+            await asyncio.to_thread(os.remove, report.file_url)
         await self.db.delete(report)
         await self.db.commit()
 

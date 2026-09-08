@@ -35,7 +35,7 @@ from services.auth.services.auth_service import AuthService
 from services.auth.services.mfa_service import MFAService
 from services.auth.dependencies.auth import get_current_active_user, oauth2_scheme
 from services.auth.models.user import User
-from services.auth.utils.password import hash_password, validate_password_strength
+from services.auth.utils.password import hash_password_async, validate_password_strength
 from services.auth.utils.jwt import revoke_token_from_string
 
 router = APIRouter()
@@ -301,7 +301,7 @@ async def forgot_password(
     if user:
         # Generate reset token
         reset_token = secrets.token_urlsafe(32)
-        token_hash = hash_password(reset_token)
+        token_hash = await hash_password_async(reset_token)
 
         # Store token with 1-hour expiry
         user.password_reset_token = token_hash
@@ -370,7 +370,7 @@ async def reset_password(
         )
 
     # Update password
-    user.password_hash = hash_password(reset_data.new_password)
+    user.password_hash = await hash_password_async(reset_data.new_password)
     user.password_changed_at = datetime.utcnow()
     user.password_reset_token = None
     user.password_reset_expires = None

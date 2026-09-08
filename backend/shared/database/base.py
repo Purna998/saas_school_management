@@ -10,20 +10,26 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
 )
 from sqlalchemy.orm import declarative_base
-from sqlalchemy.pool import NullPool
 
 from shared.config.settings import settings
 
-# Create async engine
-engine = create_async_engine(
-    settings.database_url,
-    echo=settings.database_echo,
-    pool_size=settings.database_pool_size,
-    max_overflow=settings.database_max_overflow,
-    pool_pre_ping=True,  # Verify connections before using
-    # Use NullPool for development, connection pooling for production
-    poolclass=NullPool if settings.is_development else None,
-)
+# Reuse database connections in every environment. NullPool made each local API
+# request pay for a fresh PostgreSQL connection and TLS/authentication handshake.
+engine_options = {
+    "echo": settings.database_echo,
+    "pool_pre_ping": True,
+    "pool_size": settings.database_pool_size,
+    "max_overflow": settings.database_max_overflow,
+    "pool_timeout": settings.database_pool_timeout_seconds,
+    "pool_recycle": settings.database_pool_recycle_seconds,
+    "pool_use_lifo": True,
+    "connect_args": {
+        "command_timeout": settings.database_command_timeout_seconds,
+        "server_settings": {"application_name": "nepal-sms"},
+    },
+}
+
+engine = create_async_engine(settings.database_url, **engine_options)
 
 # Create async session factory
 async_session_maker = async_sessionmaker(
@@ -51,12 +57,12 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
     async with async_session_maker() as session:
         try:
             yield session
+            # Some services intentionally flush batched SQL and let the request
+            # boundary own the transaction, so commit centrally on success.
             await session.commit()
         except Exception:
             await session.rollback()
             raise
-        finally:
-            await session.close()
 
 
 # Context manager for database sessions (for non-FastAPI usage)

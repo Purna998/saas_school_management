@@ -3,6 +3,7 @@ Nepal School Management System - Password Utilities
 Secure password hashing and validation using bcrypt
 """
 
+import asyncio
 import re
 import bcrypt
 from typing import Tuple
@@ -63,6 +64,29 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     except Exception:
         # If hash is invalid or verification fails, return False
         return False
+
+
+async def hash_password_async(password: str) -> str:
+    """Hash without blocking the FastAPI event loop."""
+    return await asyncio.to_thread(hash_password, password)
+
+
+async def verify_password_async(plain_password: str, hashed_password: str) -> bool:
+    """Verify bcrypt credentials without blocking the event loop."""
+    return await asyncio.to_thread(verify_password, plain_password, hashed_password)
+
+
+async def validate_password_change_async(
+    old_password: str,
+    new_password: str,
+    current_hash: str,
+) -> Tuple[bool, str]:
+    """Async counterpart used by request handlers."""
+    if not await verify_password_async(old_password, current_hash):
+        return False, "Current password is incorrect"
+    if old_password == new_password:
+        return False, "New password must be different from current password"
+    return validate_password_strength(new_password)
 
 
 def validate_password_strength(password: str) -> Tuple[bool, str]:

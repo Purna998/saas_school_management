@@ -39,6 +39,16 @@ from services.academic.services.academic_service import AcademicService
 router = APIRouter()
 
 
+@router.get("/overview")
+async def get_academic_overview(
+    current_user: User = Depends(require_permission("academic:read")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return all academic dashboard counters in one request and SQL query."""
+    service = AcademicService(db)
+    return success_response(await service.get_overview(current_user.school_id))
+
+
 # --- Grades ---
 
 @router.post("/grades", response_model=GradeResponse, status_code=status.HTTP_201_CREATED)

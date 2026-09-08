@@ -73,7 +73,7 @@ async def seed_demo_users():
             roles = {role.code: role for role in result.scalars().all()}
 
             if not roles:
-                print("✗ No roles found. Please run 001_roles_and_permissions.py first!")
+                print("[ERROR] No roles found. Please run 001_roles_and_permissions.py first!")
                 return
 
             # Create users
@@ -87,7 +87,7 @@ async def seed_demo_users():
                 existing_user = result.scalar_one_or_none()
 
                 if existing_user:
-                    print(f"  ⊗ User already exists: {user_data['email']}")
+                    print(f"  [OK] User already exists: {user_data['email']}")
                     continue
 
                 # Create user
@@ -110,11 +110,11 @@ async def seed_demo_users():
                     user.roles.append(roles[role_code])
 
                 session.add(user)
-                print(f"  ✓ Created user: {user_data['email']} ({role_code})")
+                print(f"  [OK] Created user: {user_data['email']} ({role_code})")
 
             # Commit all changes
             await session.commit()
-            print("\n✓ Demo users seeded successfully!")
+            print("\n[OK] Demo users seeded successfully!")
             print("\n" + "="*60)
             print("DEMO LOGIN CREDENTIALS:")
             print("="*60)
@@ -128,12 +128,12 @@ async def seed_demo_users():
             print(f"   Email:    {DEMO_TEACHER['email']}")
             print(f"   Password: {DEMO_TEACHER['password']}")
             print("\n" + "="*60)
-            print("⚠️  IMPORTANT: Change these passwords in production!")
+            print("[WARN] IMPORTANT: Change these passwords in production!")
             print("="*60 + "\n")
 
         except Exception as e:
             await session.rollback()
-            print(f"\n✗ Error seeding users: {str(e)}")
+            print(f"\n[ERROR] Error seeding users: {str(e)}")
             raise
 
         finally:

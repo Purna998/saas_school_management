@@ -8,6 +8,7 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.orm import joinedload
 
 from shared.database.base import get_db
 from shared.utils.exceptions import (
@@ -16,6 +17,7 @@ from shared.utils.exceptions import (
     AuthorizationError,
 )
 from services.auth.models.user import User
+from services.auth.models.role import Role
 from services.auth.utils.jwt import extract_user_from_token
 
 
@@ -58,9 +60,11 @@ async def get_current_user(
         # Get user from database
         user_id = user_info["user_id"]
         result = await db.execute(
-            select(User).where(User.id == user_id)
+            select(User)
+            .where(User.id == user_id)
+            .options(joinedload(User.roles).joinedload(Role.permissions))
         )
-        user = result.scalar_one_or_none()
+        user = result.unique().scalar_one_or_none()
 
         if not user:
             raise HTTPException(

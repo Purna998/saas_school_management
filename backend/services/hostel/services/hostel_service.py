@@ -62,9 +62,23 @@ class HostelService:
         await self.db.commit()
 
     async def get_occupancy(self, school_id: uuid.UUID) -> dict:
-        total_cap = (await self.db.execute(select(func.sum(Room.capacity)).where(Room.school_id == school_id, Room.is_active == True))).scalar() or 0
-        total_occ = (await self.db.execute(select(func.sum(Room.occupied)).where(Room.school_id == school_id, Room.is_active == True))).scalar() or 0
-        hostels = (await self.db.execute(select(func.count()).where(Hostel.school_id == school_id, Hostel.is_active == True))).scalar() or 0
-        rooms = (await self.db.execute(select(func.count()).where(Room.school_id == school_id, Room.is_active == True))).scalar() or 0
+        active_rooms = (Room.school_id == school_id, Room.is_active.is_(True))
+        row = (
+            await self.db.execute(
+                select(
+                    select(func.count(Hostel.id)).where(
+                        Hostel.school_id == school_id,
+                        Hostel.is_active.is_(True),
+                    ).scalar_subquery().label("hostels"),
+                    select(func.count(Room.id)).where(*active_rooms).scalar_subquery().label("rooms"),
+                    select(func.sum(Room.capacity)).where(*active_rooms).scalar_subquery().label("capacity"),
+                    select(func.sum(Room.occupied)).where(*active_rooms).scalar_subquery().label("occupied"),
+                )
+            )
+        ).one()
+        hostels = row.hostels or 0
+        rooms = row.rooms or 0
+        total_cap = row.capacity or 0
+        total_occ = row.occupied or 0
         rate = (total_occ / total_cap * 100) if total_cap > 0 else 0
         return {"total_hostels": hostels, "total_rooms": rooms, "total_capacity": total_cap, "total_occupied": total_occ, "occupancy_rate": round(rate, 1)}

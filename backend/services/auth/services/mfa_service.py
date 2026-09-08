@@ -15,6 +15,7 @@ import pyotp
 import qrcode
 import qrcode.image.svg
 from io import BytesIO
+import asyncio
 import base64
 
 from shared.config.settings import settings
@@ -26,7 +27,7 @@ from shared.utils.exceptions import (
 )
 from services.auth.models.user import User
 from services.auth.models.mfa import MFASecret
-from services.auth.utils.password import verify_password
+from services.auth.utils.password import verify_password_async
 
 logger = logging.getLogger(__name__)
 
@@ -93,7 +94,7 @@ class MFAService:
         )
 
         # Generate QR code as base64 data URL
-        qr_code_data = self._generate_qr_code(provisioning_uri)
+        qr_code_data = await asyncio.to_thread(self._generate_qr_code, provisioning_uri)
 
         return {
             "secret": secret,
@@ -198,7 +199,7 @@ class MFAService:
             raise MFANotEnabledError("MFA is not enabled for this account")
 
         # Verify password
-        if not verify_password(password, user.password_hash):
+        if not await verify_password_async(password, user.password_hash):
             raise InvalidCredentialsError("Invalid password")
 
         # Verify TOTP code
@@ -241,7 +242,7 @@ class MFAService:
         if not user.mfa_enabled:
             raise MFANotEnabledError("MFA is not enabled for this account")
 
-        if not verify_password(password, user.password_hash):
+        if not await verify_password_async(password, user.password_hash):
             raise InvalidCredentialsError("Invalid password")
 
         result = await self.db.execute(

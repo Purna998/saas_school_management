@@ -54,24 +54,26 @@ class AttendanceService:
         Returns:
             AttendanceListResponse with all records for that class/date
         """
-        records = []
+        values = [
+            {
+                "school_id": school_id,
+                "student_id": entry.student_id,
+                "grade": data.grade,
+                "section": data.section,
+                "date_bs": data.date_bs,
+                "date_ad": data.date_ad,
+                "status": AttendanceStatus(entry.status),
+                "marked_by": marked_by,
+                "remarks": entry.remarks,
+                "period_number": data.period_number,
+            }
+            for entry in data.entries
+        ]
 
-        for entry in data.entries:
-            # Use upsert pattern: insert or update on conflict
-            stmt = pg_insert(Attendance).values(
-                school_id=school_id,
-                student_id=entry.student_id,
-                grade=data.grade,
-                section=data.section,
-                date_bs=data.date_bs,
-                date_ad=data.date_ad,
-                status=AttendanceStatus(entry.status),
-                marked_by=marked_by,
-                remarks=entry.remarks,
-                period_number=data.period_number,
-            )
-
-            # On conflict (same student + date + period), update the status
+        if values:
+            # Send the whole class in one PostgreSQL round trip rather than one
+            # INSERT per student.
+            stmt = pg_insert(Attendance).values(values)
             stmt = stmt.on_conflict_do_update(
                 constraint="uq_attendance_student_date_period",
                 set_={
@@ -80,7 +82,6 @@ class AttendanceService:
                     "remarks": stmt.excluded.remarks,
                 },
             )
-
             await self.db.execute(stmt)
 
         # Flush to ensure all records are written
@@ -258,9 +259,15 @@ class AttendanceService:
         # Build BS date prefix for the month (e.g., "2081-03")
         month_prefix = f"{year_bs}-{month_bs:02d}"
 
-        # Query all attendance records for this class in the given BS month
+        # Aggregate in PostgreSQL so the API does not load one ORM object per
+        # student/day just to count statuses.
         query = (
-            select(Attendance)
+            select(
+                Attendance.date_ad,
+                Attendance.date_bs,
+                Attendance.status,
+                func.count(Attendance.id).label("status_count"),
+            )
             .where(
                 and_(
                     Attendance.school_id == school_id,
@@ -269,19 +276,20 @@ class AttendanceService:
                     Attendance.date_bs.like(f"{month_prefix}%"),
                 )
             )
+            .group_by(Attendance.date_ad, Attendance.date_bs, Attendance.status)
             .order_by(Attendance.date_ad)
         )
 
         result = await self.db.execute(query)
-        all_records = result.scalars().all()
+        aggregate_rows = result.all()
 
         # Group by date
         daily_data: dict[date, dict] = {}
-        for record in all_records:
-            record_date = record.date_ad
+        for row in aggregate_rows:
+            record_date = row.date_ad
             if record_date not in daily_data:
                 daily_data[record_date] = {
-                    "date_bs": record.date_bs,
+                    "date_bs": row.date_bs,
                     "date_ad": record_date,
                     "present_count": 0,
                     "absent_count": 0,
@@ -292,12 +300,12 @@ class AttendanceService:
                 }
 
             status_value = (
-                record.status.value
-                if isinstance(record.status, AttendanceStatus)
-                else record.status
+                row.status.value
+                if isinstance(row.status, AttendanceStatus)
+                else row.status
             )
-            daily_data[record_date][f"{status_value}_count"] += 1
-            daily_data[record_date]["total"] += 1
+            daily_data[record_date][f"{status_value}_count"] += row.status_count
+            daily_data[record_date]["total"] += row.status_count
 
         # Build daily summaries
         daily_summaries = [
@@ -354,6 +362,7 @@ class AttendanceService:
             select(
                 Attendance.status,
                 func.count(Attendance.id).label("count"),
+                func.max(Attendance.date_bs).label("date_bs"),
             )
             .where(
                 and_(
@@ -379,6 +388,7 @@ class AttendanceService:
         }
 
         total = 0
+        date_bs_value = rows[0].date_bs if rows else None
         for row in rows:
             status_value = (
                 row.status.value
@@ -387,22 +397,6 @@ class AttendanceService:
             )
             counts[f"{status_value}_count"] = row.count
             total += row.count
-
-        # Get date_bs from a record
-        date_bs_query = (
-            select(Attendance.date_bs)
-            .where(
-                and_(
-                    Attendance.school_id == school_id,
-                    Attendance.date_ad == date_ad,
-                    Attendance.grade == grade,
-                    Attendance.section == section,
-                )
-            )
-            .limit(1)
-        )
-        date_bs_result = await self.db.execute(date_bs_query)
-        date_bs_value = date_bs_result.scalar_one_or_none()
 
         return AttendanceSummaryResponse(
             date_bs=date_bs_value,

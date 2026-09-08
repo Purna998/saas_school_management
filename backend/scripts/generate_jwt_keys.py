@@ -9,6 +9,8 @@ from cryptography.hazmat.backends import default_backend
 from pathlib import Path
 import sys
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
 
 def generate_keys():
     """Generate RSA-2048 key pair for JWT signing"""
@@ -23,7 +25,7 @@ def generate_keys():
     )
 
     # Create keys directory
-    keys_dir = Path("keys")
+    keys_dir = PROJECT_ROOT / "keys"
     keys_dir.mkdir(exist_ok=True)
 
     # Save private key

@@ -164,17 +164,21 @@ class LibraryService:
         total_books = row[0] or 0
         total_copies = row[1] or 0
 
-        issued_q = select(func.count()).where(
-            BookIssue.school_id == school_id, BookIssue.status == IssueStatus.ISSUED
-        )
-        total_issued = (await self.db.execute(issued_q)).scalar() or 0
-
-        overdue_q = select(func.count()).where(
-            BookIssue.school_id == school_id,
-            BookIssue.status == IssueStatus.ISSUED,
-            BookIssue.due_date_ad < date.today()
-        )
-        overdue_count = (await self.db.execute(overdue_q)).scalar() or 0
+        issue_counts = (
+            await self.db.execute(
+                select(
+                    func.count(BookIssue.id).label("issued"),
+                    func.count(BookIssue.id).filter(
+                        BookIssue.due_date_ad < date.today()
+                    ).label("overdue"),
+                ).where(
+                    BookIssue.school_id == school_id,
+                    BookIssue.status == IssueStatus.ISSUED,
+                )
+            )
+        ).one()
+        total_issued = issue_counts.issued or 0
+        overdue_count = issue_counts.overdue or 0
 
         cat_q = select(Book.category, func.count()).where(
             Book.school_id == school_id, Book.is_active == True

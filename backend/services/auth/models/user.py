@@ -8,6 +8,7 @@ from sqlalchemy import Column, String, Boolean, DateTime, Integer, ForeignKey, T
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 import enum
+import uuid
 
 from shared.database.base import Base
 from shared.database.base_model import BaseModel, TimestampMixin, TenantMixin
@@ -25,7 +26,7 @@ class UserStatus(str, enum.Enum):
 user_roles = Table(
     "user_roles",
     Base.metadata,
-    Column("id", UUID(as_uuid=True), primary_key=True),
+    Column("id", UUID(as_uuid=True), primary_key=True, default=uuid.uuid4),
     Column("user_id", UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
     Column("role_id", UUID(as_uuid=True), ForeignKey("roles.id", ondelete="CASCADE"), nullable=False),
     Column("granted_at", DateTime(timezone=True), server_default="now()", nullable=False),
@@ -206,7 +207,8 @@ class User(Base, BaseModel, TimestampMixin, TenantMixin):
 
     def has_permission(self, permission_code: str) -> bool:
         """Check if user has specific permission"""
-        return permission_code in self.get_permissions()
+        permissions = self.get_permissions()
+        return "*:*" in permissions or permission_code in permissions
 
     def has_role(self, role_code: str) -> bool:
         """Check if user has specific role"""

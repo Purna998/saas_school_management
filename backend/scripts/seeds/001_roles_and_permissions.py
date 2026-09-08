@@ -12,6 +12,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
 
 from shared.config.settings import settings
@@ -264,6 +265,11 @@ async def seed_roles_and_permissions():
 
     async with async_session() as session:
         try:
+            existing_roles = (await session.execute(select(Role))).scalars().first()
+            if existing_roles:
+                print("[OK] Roles and permissions already seeded")
+                return
+
             # Create permissions
             print("Creating permissions...")
             permissions_map = {}
@@ -282,11 +288,10 @@ async def seed_roles_and_permissions():
                 permissions_map[perm_data["code"]] = permission
 
             await session.flush()
-            print(f"✓ Created {len(DEFAULT_PERMISSIONS)} permissions")
+            print(f"[OK] Created {len(DEFAULT_PERMISSIONS)} permissions")
 
             # Create roles
             print("\nCreating roles...")
-            roles_map = {}
             for role_data in DEFAULT_ROLES:
                 role = Role(
                     id=uuid.uuid4(),
@@ -298,29 +303,28 @@ async def seed_roles_and_permissions():
                     is_active=True,
                     requires_mfa=role_data.get("requires_mfa", False),
                     priority=role_data.get("priority", 0),
+                    permissions=[
+                        permissions_map[permission_code]
+                        for permission_code in ROLE_PERMISSIONS.get(role_data["code"], [])
+                        if permission_code in permissions_map
+                    ],
                 )
                 session.add(role)
-                roles_map[role_data["code"]] = role
 
             await session.flush()
-            print(f"✓ Created {len(DEFAULT_ROLES)} roles")
+            print(f"[OK] Created {len(DEFAULT_ROLES)} roles")
 
-            # Assign permissions to roles
             print("\nAssigning permissions to roles...")
             for role_code, permission_codes in ROLE_PERMISSIONS.items():
-                role = roles_map[role_code]
-                for perm_code in permission_codes:
-                    if perm_code in permissions_map:
-                        role.permissions.append(permissions_map[perm_code])
-                print(f"  ✓ {role_code}: {len(permission_codes)} permissions")
+                print(f"  [OK] {role_code}: {len(permission_codes)} permissions")
 
             # Commit all changes
             await session.commit()
-            print("\n✓ All roles and permissions seeded successfully!")
+            print("\n[OK] All roles and permissions seeded successfully!")
 
         except Exception as e:
             await session.rollback()
-            print(f"\n✗ Error seeding data: {str(e)}")
+            print(f"\n[ERROR] Error seeding data: {str(e)}")
             raise
 
         finally:

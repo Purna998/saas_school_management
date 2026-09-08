@@ -3,6 +3,7 @@ Nepal School Management System - Users API Routes
 User profile management endpoints
 """
 
+import asyncio
 import uuid
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -237,19 +238,22 @@ async def upload_profile_photo(
 
     if settings.s3_bucket_name and not settings.is_development:
         # Production: Upload to S3
-        import boto3
-        s3_client = boto3.client(
-            "s3",
-            region_name=settings.aws_region,
-            aws_access_key_id=settings.aws_access_key_id,
-            aws_secret_access_key=settings.aws_secret_access_key,
-        )
-        s3_client.put_object(
-            Bucket=settings.s3_bucket_name,
-            Key=filename,
-            Body=contents,
-            ContentType=file.content_type,
-        )
+        def upload_to_s3() -> None:
+            import boto3
+            s3_client = boto3.client(
+                "s3",
+                region_name=settings.aws_region,
+                aws_access_key_id=settings.aws_access_key_id,
+                aws_secret_access_key=settings.aws_secret_access_key,
+            )
+            s3_client.put_object(
+                Bucket=settings.s3_bucket_name,
+                Key=filename,
+                Body=contents,
+                ContentType=file.content_type,
+            )
+
+        await asyncio.to_thread(upload_to_s3)
 
         if settings.cloudfront_domain:
             photo_url = f"https://{settings.cloudfront_domain}/{filename}"
@@ -259,11 +263,13 @@ async def upload_profile_photo(
         # Development: Store locally
         import os
         upload_dir = os.path.join("uploads", "photos", "users", str(current_user.id))
-        os.makedirs(upload_dir, exist_ok=True)
-
         local_path = os.path.join(upload_dir, f"{uuid.uuid4().hex}.{ext}")
-        with open(local_path, "wb") as f:
-            f.write(contents)
+        def write_local_file() -> None:
+            os.makedirs(upload_dir, exist_ok=True)
+            with open(local_path, "wb") as destination:
+                destination.write(contents)
+
+        await asyncio.to_thread(write_local_file)
 
         photo_url = f"/uploads/{local_path.replace(os.sep, '/')}"
 

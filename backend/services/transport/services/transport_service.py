@@ -108,7 +108,26 @@ class TransportService:
         return result.scalars().all()
 
     async def get_summary(self, school_id: uuid.UUID) -> dict:
-        vehicles = (await self.db.execute(select(func.count()).where(Vehicle.school_id == school_id, Vehicle.is_active == True))).scalar() or 0
-        routes = (await self.db.execute(select(func.count()).where(Route.school_id == school_id, Route.is_active == True))).scalar() or 0
-        students = (await self.db.execute(select(func.count()).where(StudentTransport.school_id == school_id, StudentTransport.is_active == True))).scalar() or 0
-        return {"total_vehicles": vehicles, "total_routes": routes, "students_using": students}
+        row = (
+            await self.db.execute(
+                select(
+                    select(func.count(Vehicle.id)).where(
+                        Vehicle.school_id == school_id,
+                        Vehicle.is_active.is_(True),
+                    ).scalar_subquery().label("vehicles"),
+                    select(func.count(Route.id)).where(
+                        Route.school_id == school_id,
+                        Route.is_active.is_(True),
+                    ).scalar_subquery().label("routes"),
+                    select(func.count(StudentTransport.id)).where(
+                        StudentTransport.school_id == school_id,
+                        StudentTransport.is_active.is_(True),
+                    ).scalar_subquery().label("students"),
+                )
+            )
+        ).one()
+        return {
+            "total_vehicles": row.vehicles or 0,
+            "total_routes": row.routes or 0,
+            "students_using": row.students or 0,
+        }

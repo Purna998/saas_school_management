@@ -3,19 +3,25 @@ Nepal School Management System - Shared Configuration Settings
 Pydantic Settings with environment variable support
 """
 
+from pathlib import Path
 from typing import Optional, List
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+BACKEND_DIR = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = BACKEND_DIR.parent
 
 
 class Settings(BaseSettings):
     """Application-wide configuration settings"""
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=PROJECT_ROOT / ".env",
         env_file_encoding="utf-8",
         case_sensitive=False,
-        extra="ignore"
+        extra="ignore",
+        enable_decoding=False,
     )
 
     # Application
@@ -32,6 +38,9 @@ class Settings(BaseSettings):
     )
     database_pool_size: int = Field(default=20, description="Database connection pool size")
     database_max_overflow: int = Field(default=10, description="Max overflow connections")
+    database_pool_timeout_seconds: int = Field(default=30, description="Seconds to wait for a pooled connection")
+    database_pool_recycle_seconds: int = Field(default=1800, description="Recycle pooled connections after this many seconds")
+    database_command_timeout_seconds: int = Field(default=30, description="Maximum duration of a database command")
     database_echo: bool = Field(default=False, description="SQLAlchemy echo SQL")
 
     # Redis

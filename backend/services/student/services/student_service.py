@@ -218,7 +218,6 @@ class StudentService:
         # Paginate
         offset = (page - 1) * limit
         query = query.offset(offset).limit(limit)
-        query = query.options(selectinload(Student.guardians))
         query = query.order_by(Student.current_grade, Student.roll_number, Student.full_name_en)
 
         result = await self.db.execute(query)

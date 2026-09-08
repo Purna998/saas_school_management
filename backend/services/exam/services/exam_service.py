@@ -344,7 +344,16 @@ class ExamService:
         full_marks = exam_subject.full_marks
         exam_id = exam_subject.exam_id
         grade_level = exam_subject.exam.grade
-        created_marks = []
+        student_ids = [entry.student_id for entry in data.entries]
+        existing_result = await self.db.execute(
+            select(Mark).where(
+                Mark.exam_subject_id == data.exam_subject_id,
+                Mark.student_id.in_(student_ids),
+            )
+        )
+        existing_by_student = {
+            mark.student_id: mark for mark in existing_result.scalars().all()
+        }
 
         for entry in data.entries:
             # Validate marks don't exceed full marks
@@ -364,14 +373,7 @@ class ExamService:
             if grade_level <= 10:
                 grade_point = calculate_grade_point(entry.marks_obtained, full_marks)
 
-            # Check if mark already exists (upsert)
-            existing_result = await self.db.execute(
-                select(Mark).where(
-                    Mark.exam_subject_id == data.exam_subject_id,
-                    Mark.student_id == entry.student_id,
-                )
-            )
-            existing_mark = existing_result.scalar_one_or_none()
+            existing_mark = existing_by_student.get(entry.student_id)
 
             if existing_mark:
                 # Update existing mark
@@ -379,7 +381,6 @@ class ExamService:
                 existing_mark.grade_point = grade_point
                 existing_mark.remarks = entry.remarks
                 existing_mark.entered_by = entered_by
-                created_marks.append(existing_mark)
             else:
                 # Create new mark
                 mark = Mark(
@@ -394,13 +395,16 @@ class ExamService:
                     entered_by=entered_by,
                 )
                 self.db.add(mark)
-                created_marks.append(mark)
 
+        await self.db.flush()
+        marks_result = await self.db.execute(
+            select(Mark).where(
+                Mark.exam_subject_id == data.exam_subject_id,
+                Mark.student_id.in_(student_ids),
+            )
+        )
+        created_marks = list(marks_result.scalars().all())
         await self.db.commit()
-
-        # Refresh all marks
-        for mark in created_marks:
-            await self.db.refresh(mark)
 
         logger.info(
             f"Marks entered for exam_subject {data.exam_subject_id}: "

@@ -660,6 +660,9 @@ class FeeService:
                 func.sum(FeeLedger.amount_due).label("total_due"),
                 func.sum(FeeLedger.amount_paid).label("total_collected"),
                 func.sum(FeeLedger.balance).label("total_pending"),
+                func.sum(FeeLedger.balance).filter(
+                    FeeLedger.status == FeeStatus.overdue
+                ).label("total_overdue"),
             ).where(
                 and_(
                     FeeLedger.school_id == school_id,
@@ -672,18 +675,7 @@ class FeeService:
         total_collected = totals.total_collected or Decimal("0.00")
         total_pending = totals.total_pending or Decimal("0.00")
         total_due = totals.total_due or Decimal("0.00")
-
-        # Overdue total
-        overdue_result = await self.db.execute(
-            select(func.sum(FeeLedger.balance)).where(
-                and_(
-                    FeeLedger.school_id == school_id,
-                    FeeLedger.academic_year_bs == academic_year_bs,
-                    FeeLedger.status == FeeStatus.overdue,
-                )
-            )
-        )
-        total_overdue = overdue_result.scalar() or Decimal("0.00")
+        total_overdue = totals.total_overdue or Decimal("0.00")
 
         # Collection rate
         collection_rate = Decimal("0.00")

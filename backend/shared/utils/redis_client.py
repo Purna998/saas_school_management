@@ -3,6 +3,7 @@ Nepal School Management System - Redis Client
 Redis connection and utility functions
 """
 
+import asyncio
 import redis.asyncio as aioredis
 from typing import Optional
 import json
@@ -18,28 +19,33 @@ class RedisClient:
 
     def __init__(self):
         self._client: Optional[aioredis.Redis] = None
+        self._event_loop: Optional[asyncio.AbstractEventLoop] = None
 
-    async def connect(self):
+    async def connect(self) -> aioredis.Redis:
         """Connect to Redis"""
-        if self._client is None:
-            self._client = await aioredis.from_url(
+        current_loop = asyncio.get_running_loop()
+        if self._client is None or self._event_loop is not current_loop:
+            self._client = aioredis.from_url(
                 settings.redis_url,
                 encoding="utf-8",
                 decode_responses=True,
             )
+            self._event_loop = current_loop
             logger.info("Redis client connected")
+        return self._client
 
     async def disconnect(self):
         """Disconnect from Redis"""
         if self._client:
             await self._client.close()
+            self._client = None
+            self._event_loop = None
             logger.info("Redis client disconnected")
 
     async def get(self, key: str) -> Optional[str]:
         """Get value by key"""
-        if not self._client:
-            await self.connect()
-        return await self._client.get(key)
+        client = await self.connect()
+        return await client.get(key)
 
     async def set(
         self,
@@ -58,39 +64,33 @@ class RedisClient:
         Returns:
             True if successful
         """
-        if not self._client:
-            await self.connect()
-        return await self._client.set(key, value, ex=expire)
+        client = await self.connect()
+        return await client.set(key, value, ex=expire)
 
     async def delete(self, key: str) -> bool:
         """Delete key"""
-        if not self._client:
-            await self.connect()
-        return await self._client.delete(key) > 0
+        client = await self.connect()
+        return await client.delete(key) > 0
 
     async def exists(self, key: str) -> bool:
         """Check if key exists"""
-        if not self._client:
-            await self.connect()
-        return await self._client.exists(key) > 0
+        client = await self.connect()
+        return await client.exists(key) > 0
 
     async def expire(self, key: str, seconds: int) -> bool:
         """Set expiry on key"""
-        if not self._client:
-            await self.connect()
-        return await self._client.expire(key, seconds)
+        client = await self.connect()
+        return await client.expire(key, seconds)
 
     async def ttl(self, key: str) -> int:
         """Get time-to-live for key"""
-        if not self._client:
-            await self.connect()
-        return await self._client.ttl(key)
+        client = await self.connect()
+        return await client.ttl(key)
 
     async def incr(self, key: str) -> int:
         """Increment counter"""
-        if not self._client:
-            await self.connect()
-        return await self._client.incr(key)
+        client = await self.connect()
+        return await client.incr(key)
 
     async def get_json(self, key: str) -> Optional[dict]:
         """Get JSON value"""
@@ -115,15 +115,15 @@ class RedisClient:
 
     async def keys(self, pattern: str) -> list[str]:
         """Get keys matching pattern"""
-        if not self._client:
-            await self.connect()
-        return await self._client.keys(pattern)
+        client = await self.connect()
+        return await client.keys(pattern)
 
     async def delete_pattern(self, pattern: str) -> int:
         """Delete all keys matching pattern"""
         keys = await self.keys(pattern)
         if keys:
-            return await self._client.delete(*keys)
+            client = await self.connect()
+            return await client.delete(*keys)
         return 0
 
 

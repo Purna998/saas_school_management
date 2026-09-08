@@ -382,18 +382,20 @@ class StaffService:
         Returns:
             List of created/updated StaffAttendance records
         """
-        records = []
+        staff_ids = [entry.staff_id for entry in data.attendances]
+        existing_result = await self.db.execute(
+            select(StaffAttendance).where(
+                StaffAttendance.school_id == school_id,
+                StaffAttendance.staff_id.in_(staff_ids),
+                StaffAttendance.date_ad == data.date_ad,
+            )
+        )
+        existing_by_staff = {
+            record.staff_id: record for record in existing_result.scalars().all()
+        }
 
         for entry in data.attendances:
-            # Check if attendance already exists for this staff on this date
-            result = await self.db.execute(
-                select(StaffAttendance).where(
-                    StaffAttendance.school_id == school_id,
-                    StaffAttendance.staff_id == entry.staff_id,
-                    StaffAttendance.date_ad == data.date_ad,
-                )
-            )
-            existing = result.scalar_one_or_none()
+            existing = existing_by_staff.get(entry.staff_id)
 
             if existing:
                 # Update existing record
@@ -401,7 +403,6 @@ class StaffService:
                 existing.check_in_time = entry.check_in_time
                 existing.check_out_time = entry.check_out_time
                 existing.date_bs = data.date_bs
-                records.append(existing)
             else:
                 # Create new record
                 attendance = StaffAttendance(
@@ -415,13 +416,17 @@ class StaffService:
                     check_out_time=entry.check_out_time,
                 )
                 self.db.add(attendance)
-                records.append(attendance)
 
+        await self.db.flush()
+        records_result = await self.db.execute(
+            select(StaffAttendance).where(
+                StaffAttendance.school_id == school_id,
+                StaffAttendance.staff_id.in_(staff_ids),
+                StaffAttendance.date_ad == data.date_ad,
+            )
+        )
+        records = list(records_result.scalars().all())
         await self.db.commit()
-
-        # Refresh all records
-        for record in records:
-            await self.db.refresh(record)
 
         logger.info(
             f"Attendance marked: {len(records)} staff for {data.date_ad}"

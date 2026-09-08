@@ -15,11 +15,13 @@ Features:
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 import logging
 
 from shared.config.settings import settings
 from shared.database.base import init_db, close_db
+from shared.performance import install_performance_middleware
 from shared.utils.exceptions import NepalSMSException, exception_to_http
 from services.student.api import students
 
@@ -51,6 +53,9 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+install_performance_middleware(app)
+
+app.add_middleware(GZipMiddleware, minimum_size=1000, compresslevel=5)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,

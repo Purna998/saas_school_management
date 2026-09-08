@@ -3,6 +3,7 @@ Nepal School Management System - Student API Routes
 Student management endpoints
 """
 
+import asyncio
 import uuid
 import csv
 import io
@@ -34,7 +35,7 @@ from services.student.services.student_service import StudentService
 router = APIRouter()
 
 
-def _student_to_response(student) -> StudentResponse:
+def _student_to_response(student, *, include_guardians: bool = True) -> StudentResponse:
     """Convert student model to response schema"""
     return StudentResponse(
         id=student.id,
@@ -73,13 +74,13 @@ def _student_to_response(student) -> StudentResponse:
                 is_primary_contact=g.is_primary_contact,
             )
             for g in (student.guardians or [])
-        ],
+        ] if include_guardians else [],
         created_at=student.created_at,
         updated_at=student.updated_at,
     )
 
 
-@router.post("/", response_model=StudentResponse, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=StudentResponse, status_code=status.HTTP_201_CREATED)
 async def create_student(
     student_data: StudentCreate,
     current_user: User = Depends(require_permission("student:create")),
@@ -194,7 +195,7 @@ async def delete_student(
         )
 
 
-@router.get("/", response_model=StudentListResponse)
+@router.get("", response_model=StudentListResponse)
 async def list_students(
     page: int = Query(default=1, ge=1),
     limit: int = Query(default=20, ge=1, le=100),
@@ -229,7 +230,9 @@ async def list_students(
     )
 
     return StudentListResponse(
-        students=[_student_to_response(s) for s in students],
+        # List views do not use guardian details. Avoid both the relationship
+        # query and the extra response payload; details still include them.
+        students=[_student_to_response(s, include_guardians=False) for s in students],
         total=total,
         page=page,
         limit=limit,
@@ -358,12 +361,14 @@ async def upload_student_photo(
 
     ext = file.filename.rsplit(".", 1)[-1] if file.filename and "." in file.filename else "jpg"
     upload_dir = os.path.join("uploads", "photos", "students", str(student.school_id))
-    os.makedirs(upload_dir, exist_ok=True)
-
     filename = f"{student.id}.{ext}"
     filepath = os.path.join(upload_dir, filename)
-    with open(filepath, "wb") as f:
-        f.write(contents)
+    def write_photo() -> None:
+        os.makedirs(upload_dir, exist_ok=True)
+        with open(filepath, "wb") as destination:
+            destination.write(contents)
+
+    await asyncio.to_thread(write_photo)
 
     photo_url = f"/uploads/photos/students/{student.school_id}/{filename}"
     student.photo_url = photo_url

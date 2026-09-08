@@ -19,9 +19,8 @@ from shared.utils.exceptions import (
 from services.auth.models.user import User, UserStatus
 from services.auth.models.role import Role
 from services.auth.utils.password import (
-    hash_password,
-    verify_password,
-    validate_password_change,
+    hash_password_async,
+    validate_password_change_async,
 )
 from services.auth.schemas.user import UserCreate, UserUpdate
 
@@ -57,7 +56,7 @@ class UserService:
             raise DuplicateRecordError("User", "email", user_data.email)
 
         # Hash password
-        password_hash = hash_password(user_data.password)
+        password_hash = await hash_password_async(user_data.password)
 
         # Create user
         user = User(
@@ -191,7 +190,7 @@ class UserService:
         user = await self.get_user_by_id(user_id)
 
         # Validate password change
-        is_valid, error = validate_password_change(
+        is_valid, error = await validate_password_change_async(
             old_password,
             new_password,
             user.password_hash
@@ -203,7 +202,7 @@ class UserService:
             raise ValueError(error)
 
         # Update password
-        user.password_hash = hash_password(new_password)
+        user.password_hash = await hash_password_async(new_password)
         user.password_changed_at = datetime.utcnow()
 
         await self.db.commit()

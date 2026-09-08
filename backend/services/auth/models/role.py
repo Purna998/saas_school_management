@@ -3,6 +3,8 @@ Nepal School Management System - Role & Permission Models
 RBAC (Role-Based Access Control) implementation
 """
 
+import uuid
+
 from sqlalchemy import Column, String, Boolean, Integer, Text, ForeignKey, Table
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
@@ -15,7 +17,7 @@ from shared.database.base_model import BaseModel, TimestampMixin
 role_permissions = Table(
     "role_permissions",
     Base.metadata,
-    Column("id", UUID(as_uuid=True), primary_key=True),
+    Column("id", UUID(as_uuid=True), primary_key=True, default=uuid.uuid4),
     Column("role_id", UUID(as_uuid=True), ForeignKey("roles.id", ondelete="CASCADE"), nullable=False),
     Column("permission_id", UUID(as_uuid=True), ForeignKey("permissions.id", ondelete="CASCADE"), nullable=False),
 )

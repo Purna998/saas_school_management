@@ -3,13 +3,14 @@ Nepal School Management System - Auth Service
 Core authentication business logic: login, logout, refresh tokens
 """
 
+import asyncio
 import uuid
 import logging
 from datetime import datetime, timedelta
 from typing import Optional, Tuple, Dict
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import joinedload
 
 from shared.config.settings import settings
 from shared.utils.exceptions import (
@@ -19,8 +20,9 @@ from shared.utils.exceptions import (
     MFARequiredError,
 )
 from services.auth.models.user import User, UserStatus
+from services.auth.models.role import Role
 from services.auth.models.session import UserSession, LoginAttempt, LoginStatus, SessionStatus
-from services.auth.utils.password import verify_password
+from services.auth.utils.password import verify_password_async
 from services.auth.utils.jwt import (
     generate_access_token,
     generate_refresh_token,
@@ -65,33 +67,33 @@ class AuthService:
             MFARequiredError: If MFA verification is required
         """
         # Check rate limiting
-        await self.rate_limiter.check_login_attempts(email)
-        await self.rate_limiter.check_login_attempts(ip_address or "unknown")
+        await asyncio.gather(
+            self.rate_limiter.check_login_attempts(email),
+            self.rate_limiter.check_login_attempts(ip_address or "unknown"),
+        )
 
         # Get user with roles
         result = await self.db.execute(
             select(User)
             .where(User.email == email)
-            .options(selectinload(User.roles))
+            .options(joinedload(User.roles).joinedload(Role.permissions))
         )
-        user = result.scalar_one_or_none()
-
-        # Record login attempt
-        await self._record_login_attempt(
-            user_id=user.id if user else None,
-            email=email,
-            status=LoginStatus.FAILED,
-            ip_address=ip_address,
-            user_agent=user_agent,
-            failure_reason="user_not_found" if not user else None,
-        )
+        user = result.unique().scalar_one_or_none()
 
         if not user:
+            await self._record_login_attempt(
+                user_id=None,
+                email=email,
+                status=LoginStatus.FAILED,
+                ip_address=ip_address,
+                user_agent=user_agent,
+                failure_reason="user_not_found",
+            )
             await self.rate_limiter.record_failed_login(email)
             raise InvalidCredentialsError("Invalid email or password")
 
         # Verify password
-        if not verify_password(password, user.password_hash):
+        if not await verify_password_async(password, user.password_hash):
             await self.rate_limiter.record_failed_login(email)
             await self._record_login_attempt(
                 user_id=user.id,
@@ -139,8 +141,10 @@ class AuthService:
             raise MFARequiredError("MFA verification required")
 
         # Reset rate limit on successful login
-        await self.rate_limiter.reset_login_attempts(email)
-        await self.rate_limiter.reset_login_attempts(ip_address or "unknown")
+        await asyncio.gather(
+            self.rate_limiter.reset_login_attempts(email),
+            self.rate_limiter.reset_login_attempts(ip_address or "unknown"),
+        )
 
         # Generate tokens
         tokens = await self._generate_tokens(user, ip_address, user_agent)
@@ -149,7 +153,6 @@ class AuthService:
         user.last_login_at = datetime.utcnow()
         user.last_login_ip = ip_address
         user.failed_login_attempts = 0
-        await self.db.commit()
 
         # Record successful login
         await self._record_login_attempt(
@@ -159,6 +162,7 @@ class AuthService:
             ip_address=ip_address,
             user_agent=user_agent,
         )
+        await self.db.commit()
 
         logger.info(f"User logged in successfully: {user.email}")
 
@@ -359,7 +363,6 @@ class AuthService:
 
         # Save session
         self.db.add(session)
-        await self.db.flush()
 
         return {
             "access_token": access_token,
@@ -388,7 +391,6 @@ class AuthService:
             failure_reason=failure_reason,
         )
         self.db.add(attempt)
-        await self.db.flush()
 
     def _format_user_info(self, user: User) -> Dict:
         """Format user information for response"""

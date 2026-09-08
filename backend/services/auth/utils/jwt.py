@@ -8,35 +8,52 @@ import uuid
 from datetime import datetime, timedelta
 from typing import Optional
 from pathlib import Path
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateKey, RSAPublicKey
 
-from shared.config.settings import settings
+from shared.config.settings import PROJECT_ROOT, settings
 from shared.utils.exceptions import InvalidTokenError, AuthenticationError
 from shared.utils.redis_client import add_token_to_blocklist, is_token_blocklisted
 
 
 # Load RSA keys
-def _load_private_key() -> str:
+def _resolve_key_path(configured_path: str | None) -> Path:
+    """Resolve key paths relative to the repository root."""
+    if not configured_path:
+        raise FileNotFoundError("JWT key path is not configured")
+
+    key_path = Path(configured_path)
+    return key_path if key_path.is_absolute() else PROJECT_ROOT / key_path
+
+
+def _load_private_key() -> RSAPrivateKey:
     """Load RSA private key from file"""
-    key_path = Path(settings.jwt_private_key_path)
+    key_path = _resolve_key_path(settings.jwt_private_key_path)
     if not key_path.exists():
         raise FileNotFoundError(
             f"JWT private key not found at {key_path}. "
             "Run: python scripts/generate_jwt_keys.py"
         )
-    with open(key_path, "r") as f:
-        return f.read()
+    with open(key_path, "rb") as key_file:
+        key = serialization.load_pem_private_key(key_file.read(), password=None)
+    if not isinstance(key, RSAPrivateKey):
+        raise TypeError("JWT private key must be an RSA private key")
+    return key
 
 
-def _load_public_key() -> str:
+def _load_public_key() -> RSAPublicKey:
     """Load RSA public key from file"""
-    key_path = Path(settings.jwt_public_key_path)
+    key_path = _resolve_key_path(settings.jwt_public_key_path)
     if not key_path.exists():
         raise FileNotFoundError(
             f"JWT public key not found at {key_path}. "
             "Run: python scripts/generate_jwt_keys.py"
         )
-    with open(key_path, "r") as f:
-        return f.read()
+    with open(key_path, "rb") as key_file:
+        key = serialization.load_pem_public_key(key_file.read())
+    if not isinstance(key, RSAPublicKey):
+        raise TypeError("JWT public key must be an RSA public key")
+    return key
 
 
 # Cache keys in memory (loaded once at module import)

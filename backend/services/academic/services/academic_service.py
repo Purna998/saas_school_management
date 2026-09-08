@@ -46,6 +46,34 @@ class AcademicService:
     def __init__(self, db: AsyncSession):
         self.db = db
 
+    async def get_overview(self, school_id: uuid.UUID) -> dict[str, int]:
+        """Return dashboard counts in one database round trip."""
+        grade_count = select(func.count(Grade.id)).where(
+            Grade.school_id == school_id,
+            Grade.is_active.is_(True),
+        )
+        section_count = select(func.count(Section.id)).where(
+            Section.school_id == school_id,
+            Section.is_active.is_(True),
+        )
+        subject_count = select(func.count(Subject.id)).where(
+            Subject.school_id == school_id,
+            Subject.is_active.is_(True),
+        )
+        faculty_count = select(func.count(HSFaculty.id)).where(
+            HSFaculty.school_id == school_id,
+            HSFaculty.is_active.is_(True),
+        )
+        result = await self.db.execute(
+            select(
+                grade_count.scalar_subquery().label("grades"),
+                section_count.scalar_subquery().label("sections"),
+                subject_count.scalar_subquery().label("subjects"),
+                faculty_count.scalar_subquery().label("faculties"),
+            )
+        )
+        return dict(result.one()._mapping)
+
     # --- Grades ---
 
     async def create_grade(self, data: GradeCreate, school_id: uuid.UUID) -> Grade:

@@ -101,7 +101,7 @@ def _attendance_to_response(attendance) -> StaffAttendanceResponse:
 
 # ============ Staff CRUD Endpoints ============
 
-@router.post("/", status_code=status.HTTP_201_CREATED)
+@router.post("", status_code=status.HTTP_201_CREATED)
 async def create_staff(
     staff_data: StaffCreate,
     current_user: User = Depends(require_permission("staff:create")),
@@ -137,7 +137,7 @@ async def create_staff(
         )
 
 
-@router.get("/")
+@router.get("")
 async def list_staff(
     page: int = Query(default=1, ge=1),
     limit: int = Query(default=20, ge=1, le=100),

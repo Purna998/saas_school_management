@@ -92,8 +92,9 @@ class InventoryService:
         return result.scalars().all()
 
     async def get_stats(self, school_id: uuid.UUID) -> dict:
-        total = (await self.db.execute(select(func.count()).where(Asset.school_id == school_id, Asset.is_active == True))).scalar() or 0
-        total_val = (await self.db.execute(select(func.sum(Asset.total_value)).where(Asset.school_id == school_id, Asset.is_active == True))).scalar() or 0
+        totals = (await self.db.execute(select(func.count(Asset.id), func.sum(Asset.total_value)).where(Asset.school_id == school_id, Asset.is_active == True))).one()
+        total = totals[0] or 0
+        total_val = totals[1] or 0
         cat_q = await self.db.execute(select(Asset.category, func.count()).where(Asset.school_id == school_id, Asset.is_active == True).group_by(Asset.category))
         cond_q = await self.db.execute(select(Asset.condition, func.count()).where(Asset.school_id == school_id, Asset.is_active == True).group_by(Asset.condition))
         return {"total_assets": total, "total_value": float(total_val), "by_category": {r[0].value: r[1] for r in cat_q.all()}, "by_condition": {r[0].value: r[1] for r in cond_q.all()}}

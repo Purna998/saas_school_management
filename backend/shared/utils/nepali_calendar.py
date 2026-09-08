@@ -6,7 +6,7 @@ Handles BS <-> AD date conversion and Nepal timezone (NPT UTC+5:45)
 from datetime import datetime, date
 from typing import Tuple
 import pytz
-from nepali_datetime import nepali_datetime, date as nepali_date
+from nepali_datetime import datetime as nepali_datetime, date as nepali_date
 
 
 # Nepal Timezone
