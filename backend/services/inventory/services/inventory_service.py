@@ -27,15 +27,15 @@ class InventoryService:
         await self.db.refresh(asset)
         return asset
 
-    async def get_asset(self, asset_id: uuid.UUID) -> Asset:
-        result = await self.db.execute(select(Asset).where(Asset.id == asset_id))
+    async def get_asset(self, asset_id: uuid.UUID, school_id: uuid.UUID) -> Asset:
+        result = await self.db.execute(select(Asset).where(Asset.id == asset_id, Asset.school_id == school_id))
         asset = result.scalar_one_or_none()
         if not asset:
             raise RecordNotFoundError("Asset", str(asset_id))
         return asset
 
-    async def update_asset(self, asset_id: uuid.UUID, data: dict) -> Asset:
-        asset = await self.get_asset(asset_id)
+    async def update_asset(self, asset_id: uuid.UUID, data: dict, school_id: uuid.UUID) -> Asset:
+        asset = await self.get_asset(asset_id, school_id)
         for k, v in data.items():
             if v is not None and hasattr(asset, k):
                 if k == "condition":
@@ -59,7 +59,7 @@ class InventoryService:
         return assets, total
 
     async def record_movement(self, school_id: uuid.UUID, data: dict, moved_by: uuid.UUID) -> StockMovement:
-        asset = await self.get_asset(data["asset_id"])
+        asset = await self.get_asset(data["asset_id"], school_id)
         mt = MovementType(data["movement_type"])
         qty = data["quantity"]
 
@@ -83,8 +83,8 @@ class InventoryService:
         await self.db.refresh(movement)
         return movement
 
-    async def get_asset_history(self, asset_id: uuid.UUID) -> List[StockMovement]:
-        result = await self.db.execute(select(StockMovement).where(StockMovement.asset_id == asset_id).order_by(StockMovement.moved_date_ad.desc()))
+    async def get_asset_history(self, asset_id: uuid.UUID, school_id: uuid.UUID) -> List[StockMovement]:
+        result = await self.db.execute(select(StockMovement).where(StockMovement.asset_id == asset_id, StockMovement.school_id == school_id).order_by(StockMovement.moved_date_ad.desc()))
         return result.scalars().all()
 
     async def get_low_stock(self, school_id: uuid.UUID, threshold: int = 5) -> List[Asset]:

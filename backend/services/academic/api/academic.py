@@ -111,7 +111,7 @@ async def get_grade(
     """Get grade details with sections"""
     try:
         service = AcademicService(db)
-        grade = await service.get_grade(grade_id)
+        grade = await service.get_grade(grade_id, current_user.school_id)
         return GradeResponse(
             id=grade.id,
             grade_number=grade.grade_number,
@@ -159,7 +159,7 @@ async def list_sections(
 ):
     """List all sections for a grade"""
     service = AcademicService(db)
-    sections = await service.list_sections(grade_id)
+    sections = await service.list_sections(grade_id, current_user.school_id)
     return [
         SectionResponse(
             id=s.id, grade_id=s.grade_id, name=s.name,
@@ -200,7 +200,7 @@ async def list_subjects(
 ):
     """List subjects for a grade (optionally filtered by faculty)"""
     service = AcademicService(db)
-    subjects = await service.list_subjects(grade_id, faculty_id)
+    subjects = await service.list_subjects(grade_id, current_user.school_id, faculty_id)
     return [
         SubjectResponse(
             id=s.id, grade_id=s.grade_id, code=s.code,
@@ -243,8 +243,8 @@ async def get_timetable(
 ):
     """Get full timetable for a section"""
     service = AcademicService(db)
-    section = await service.get_section(section_id)
-    entries = await service.get_timetable(section_id)
+    section = await service.get_section(section_id, current_user.school_id)
+    entries = await service.get_timetable(section_id, current_user.school_id)
 
     return TimetableResponse(
         grade_id=section.grade_id,
@@ -317,7 +317,7 @@ async def get_faculty(
     """Get faculty details with streams"""
     try:
         service = AcademicService(db)
-        faculty = await service.get_faculty(faculty_id)
+        faculty = await service.get_faculty(faculty_id, current_user.school_id)
         return HSFacultyResponse(
             id=faculty.id, name_en=faculty.name_en, name_np=faculty.name_np,
             code=faculty.code, description=faculty.description,

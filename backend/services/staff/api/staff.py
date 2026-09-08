@@ -198,7 +198,7 @@ async def get_staff(
     """
     try:
         service = StaffService(db)
-        staff = await service.get_staff(staff_id)
+        staff = await service.get_staff(staff_id, current_user.school_id)
         return success_response(data=_staff_to_response(staff).model_dump(mode="json"))
 
     except RecordNotFoundError as e:
@@ -311,6 +311,7 @@ async def approve_leave(
         leave = await service.approve_leave(
             leave_id=leave_id,
             approved_by=current_user.id,
+            school_id=current_user.school_id,
         )
         return success_response(data=_leave_to_response(leave).model_dump(mode="json"))
 
@@ -347,6 +348,7 @@ async def reject_leave(
         leave = await service.reject_leave(
             leave_id=leave_id,
             rejected_by=current_user.id,
+            school_id=current_user.school_id,
         )
         return success_response(data=_leave_to_response(leave).model_dump(mode="json"))
 
@@ -420,6 +422,7 @@ async def get_staff_attendance(
         service = StaffService(db)
         records, total = await service.get_staff_attendance(
             staff_id=staff_id,
+            school_id=current_user.school_id,
             start_date=start_date,
             end_date=end_date,
             page=page,
@@ -461,6 +464,7 @@ async def get_staff_attendance_summary(
         service = StaffService(db)
         summary = await service.get_staff_attendance_summary(
             staff_id=staff_id,
+            school_id=current_user.school_id,
             start_date=start_date,
             end_date=end_date,
         )

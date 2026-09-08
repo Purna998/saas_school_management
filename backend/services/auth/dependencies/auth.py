@@ -4,6 +4,7 @@ FastAPI dependencies for JWT authentication and authorization
 """
 
 from typing import Optional
+from uuid import UUID
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -191,6 +192,50 @@ def require_permission(permission: str):
         return current_user
 
     return permission_checker
+
+
+def require_tenant_permission(permission: str):
+    """Require a permission and enforce access to the tenant in the URL.
+
+    Platform super admins may operate across tenants. Every other role is
+    restricted to the school attached to its authenticated user, regardless
+    of any tenant ID supplied by the client.
+    """
+    async def tenant_permission_checker(
+        tenant_id: UUID,
+        current_user: User = Depends(get_current_active_user),
+    ) -> User:
+        if not current_user.has_permission(permission):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "success": False,
+                    "data": None,
+                    "error": {
+                        "code": "INSUFFICIENT_PERMISSIONS",
+                        "message": f"Permission '{permission}' required",
+                        "details": {"required_permission": permission},
+                    },
+                },
+            )
+
+        if not current_user.has_role("super_admin") and current_user.school_id != tenant_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "success": False,
+                    "data": None,
+                    "error": {
+                        "code": "TENANT_ACCESS_DENIED",
+                        "message": "You cannot access another school's data",
+                        "details": {},
+                    },
+                },
+            )
+
+        return current_user
+
+    return tenant_permission_checker
 
 
 def require_role(role: str):

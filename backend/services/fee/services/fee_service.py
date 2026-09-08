@@ -150,6 +150,7 @@ class FeeService:
         self,
         fee_structure_id: uuid.UUID,
         data: FeeHeadCreate,
+        school_id: uuid.UUID,
     ) -> FeeHead:
         """
         Add a fee head to an existing fee structure.
@@ -166,7 +167,10 @@ class FeeService:
         """
         # Verify fee structure exists
         result = await self.db.execute(
-            select(FeeStructure).where(FeeStructure.id == fee_structure_id)
+            select(FeeStructure).where(
+                FeeStructure.id == fee_structure_id,
+                FeeStructure.school_id == school_id,
+            )
         )
         fee_structure = result.scalar_one_or_none()
         if not fee_structure:

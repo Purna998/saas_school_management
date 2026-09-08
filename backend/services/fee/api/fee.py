@@ -116,6 +116,7 @@ async def add_fee_head(
         fee_head = await service.add_fee_head(
             fee_structure_id=structure_id,
             data=data,
+            school_id=current_user.school_id,
         )
         return success_response(
             data=FeeHeadResponse.model_validate(fee_head).model_dump(mode="json")

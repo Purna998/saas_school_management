@@ -135,11 +135,11 @@ class StudentService:
         logger.info(f"Student created: {student.full_name_en} (ID: {student.id})")
         return student
 
-    async def get_student(self, student_id: uuid.UUID) -> Student:
+    async def get_student(self, student_id: uuid.UUID, school_id: uuid.UUID) -> Student:
         """Get student by ID with guardians"""
         result = await self.db.execute(
             select(Student)
-            .where(Student.id == student_id, Student.deleted_at.is_(None))
+            .where(Student.id == student_id, Student.school_id == school_id, Student.deleted_at.is_(None))
             .options(selectinload(Student.guardians))
         )
         student = result.scalar_one_or_none()
@@ -149,9 +149,9 @@ class StudentService:
 
         return student
 
-    async def update_student(self, student_id: uuid.UUID, data: StudentUpdate) -> Student:
+    async def update_student(self, student_id: uuid.UUID, data: StudentUpdate, school_id: uuid.UUID) -> Student:
         """Update student details"""
-        student = await self.get_student(student_id)
+        student = await self.get_student(student_id, school_id)
 
         update_fields = data.model_dump(exclude_unset=True)
         for field, value in update_fields.items():
@@ -167,9 +167,9 @@ class StudentService:
         logger.info(f"Student updated: {student.full_name_en}")
         return student
 
-    async def delete_student(self, student_id: uuid.UUID):
+    async def delete_student(self, student_id: uuid.UUID, school_id: uuid.UUID):
         """Soft delete student"""
-        student = await self.get_student(student_id)
+        student = await self.get_student(student_id, school_id)
         student.deleted_at = datetime.utcnow()
         student.status = StudentStatus.INACTIVE
 
@@ -294,11 +294,11 @@ class StudentService:
             "errors": errors[:50],  # Limit error details
         }
 
-    async def get_enrollment_history(self, student_id: uuid.UUID) -> List[StudentEnrollment]:
+    async def get_enrollment_history(self, student_id: uuid.UUID, school_id: uuid.UUID) -> List[StudentEnrollment]:
         """Get enrollment history for a student"""
         result = await self.db.execute(
             select(StudentEnrollment)
-            .where(StudentEnrollment.student_id == student_id)
+            .where(StudentEnrollment.student_id == student_id, StudentEnrollment.school_id == school_id)
             .order_by(StudentEnrollment.academic_year_bs.desc())
         )
         return result.scalars().all()

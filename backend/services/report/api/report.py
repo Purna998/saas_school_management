@@ -31,13 +31,13 @@ async def list_reports(page: int = Query(1, ge=1), limit: int = Query(20, ge=1, 
 @router.get("/{report_id}", response_model=ReportResponse)
 async def get_report(report_id: uuid.UUID, user: User = Depends(require_permission("report:read")), db: AsyncSession = Depends(get_db)):
     s = ReportService(db)
-    return ReportResponse.model_validate(await s.get_report(report_id))
+    return ReportResponse.model_validate(await s.get_report(report_id, user.school_id))
 
 
 @router.get("/{report_id}/download")
 async def download_report(report_id: uuid.UUID, user: User = Depends(require_permission("report:read")), db: AsyncSession = Depends(get_db)):
     s = ReportService(db)
-    report = await s.get_report(report_id)
+    report = await s.get_report(report_id, user.school_id)
     if not report.file_url:
         raise HTTPException(status_code=404, detail=error_response("Report file not found", "FILE_NOT_FOUND"))
     import os
@@ -49,5 +49,5 @@ async def download_report(report_id: uuid.UUID, user: User = Depends(require_per
 @router.delete("/{report_id}")
 async def delete_report(report_id: uuid.UUID, user: User = Depends(require_permission("report:delete")), db: AsyncSession = Depends(get_db)):
     s = ReportService(db)
-    await s.delete_report(report_id)
+    await s.delete_report(report_id, user.school_id)
     return success_response(data={"message": "Report deleted"})

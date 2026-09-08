@@ -55,8 +55,8 @@ class ReportService:
         await self.db.refresh(report)
         return report
 
-    async def get_report(self, report_id: uuid.UUID) -> Report:
-        result = await self.db.execute(select(Report).where(Report.id == report_id))
+    async def get_report(self, report_id: uuid.UUID, school_id: uuid.UUID) -> Report:
+        result = await self.db.execute(select(Report).where(Report.id == report_id, Report.school_id == school_id))
         report = result.scalar_one_or_none()
         if not report:
             raise RecordNotFoundError("Report", str(report_id))
@@ -69,8 +69,8 @@ class ReportService:
         reports = (await self.db.execute(query)).scalars().all()
         return reports, total
 
-    async def delete_report(self, report_id: uuid.UUID):
-        report = await self.get_report(report_id)
+    async def delete_report(self, report_id: uuid.UUID, school_id: uuid.UUID):
+        report = await self.get_report(report_id, school_id)
         if report.file_url and os.path.exists(report.file_url):
             await asyncio.to_thread(os.remove, report.file_url)
         await self.db.delete(report)

@@ -40,15 +40,15 @@ class LibraryService:
         await self.db.refresh(book)
         return book
 
-    async def get_book(self, book_id: uuid.UUID) -> Book:
-        result = await self.db.execute(select(Book).where(Book.id == book_id))
+    async def get_book(self, book_id: uuid.UUID, school_id: uuid.UUID) -> Book:
+        result = await self.db.execute(select(Book).where(Book.id == book_id, Book.school_id == school_id))
         book = result.scalar_one_or_none()
         if not book:
             raise RecordNotFoundError("Book", str(book_id))
         return book
 
-    async def update_book(self, book_id: uuid.UUID, data: dict) -> Book:
-        book = await self.get_book(book_id)
+    async def update_book(self, book_id: uuid.UUID, data: dict, school_id: uuid.UUID) -> Book:
+        book = await self.get_book(book_id, school_id)
         for key, value in data.items():
             if value is not None and hasattr(book, key):
                 if key == "category":
@@ -87,7 +87,7 @@ class LibraryService:
         self, school_id: uuid.UUID, book_id: uuid.UUID, issued_to_id: uuid.UUID,
         issued_to_type: str, due_days: int, issued_by: uuid.UUID
     ) -> BookIssue:
-        book = await self.get_book(book_id)
+        book = await self.get_book(book_id, school_id)
         if book.available_copies <= 0:
             raise ValueError("No copies available for issue")
 
@@ -109,9 +109,9 @@ class LibraryService:
         return issue
 
     async def return_book(
-        self, book_issue_id: uuid.UUID, returned_to: uuid.UUID, fine_amount: float = 0
+        self, book_issue_id: uuid.UUID, returned_to: uuid.UUID, school_id: uuid.UUID, fine_amount: float = 0
     ) -> BookIssue:
-        result = await self.db.execute(select(BookIssue).where(BookIssue.id == book_issue_id))
+        result = await self.db.execute(select(BookIssue).where(BookIssue.id == book_issue_id, BookIssue.school_id == school_id))
         issue = result.scalar_one_or_none()
         if not issue:
             raise RecordNotFoundError("BookIssue", str(book_issue_id))
@@ -121,7 +121,7 @@ class LibraryService:
         issue.returned_to = returned_to
         issue.fine_amount = fine_amount
 
-        book = await self.get_book(issue.book_id)
+        book = await self.get_book(issue.book_id, school_id)
         book.available_copies += 1
 
         await self.db.commit()

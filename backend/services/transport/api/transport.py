@@ -35,7 +35,7 @@ async def list_vehicles(current_user: User = Depends(require_permission("transpo
 async def create_route(data: RouteCreate, current_user: User = Depends(require_permission("transport:create")), db: AsyncSession = Depends(get_db)):
     service = TransportService(db)
     route = await service.create_route(current_user.school_id, data.model_dump())
-    route = await service.get_route(route.id)
+    route = await service.get_route(route.id, current_user.school_id)
     return RouteResponse(id=route.id, name=route.name, start_point=route.start_point, end_point=route.end_point, description=route.description, distance_km=float(route.distance_km) if route.distance_km else None, estimated_time_minutes=route.estimated_time_minutes, is_active=route.is_active, stops=[RouteStopResponse(id=s.id, stop_name=s.stop_name, stop_order=s.stop_order, pickup_time=str(s.pickup_time) if s.pickup_time else None, drop_time=str(s.drop_time) if s.drop_time else None, latitude=float(s.latitude) if s.latitude else None, longitude=float(s.longitude) if s.longitude else None) for s in route.stops])
 
 
@@ -49,7 +49,7 @@ async def list_routes(current_user: User = Depends(require_permission("transport
 @router.get("/routes/{route_id}", response_model=RouteResponse)
 async def get_route(route_id: uuid.UUID, current_user: User = Depends(require_permission("transport:read")), db: AsyncSession = Depends(get_db)):
     service = TransportService(db)
-    r = await service.get_route(route_id)
+    r = await service.get_route(route_id, current_user.school_id)
     return RouteResponse(id=r.id, name=r.name, start_point=r.start_point, end_point=r.end_point, description=r.description, distance_km=float(r.distance_km) if r.distance_km else None, estimated_time_minutes=r.estimated_time_minutes, is_active=r.is_active, stops=[RouteStopResponse(id=s.id, stop_name=s.stop_name, stop_order=s.stop_order, pickup_time=str(s.pickup_time) if s.pickup_time else None, drop_time=str(s.drop_time) if s.drop_time else None, latitude=float(s.latitude) if s.latitude else None, longitude=float(s.longitude) if s.longitude else None) for s in r.stops])
 
 
@@ -63,14 +63,14 @@ async def assign_student(data: StudentTransportAssign, current_user: User = Depe
 @router.delete("/assign/{assignment_id}")
 async def remove_assignment(assignment_id: uuid.UUID, current_user: User = Depends(require_permission("transport:delete")), db: AsyncSession = Depends(get_db)):
     service = TransportService(db)
-    await service.remove_assignment(assignment_id)
+    await service.remove_assignment(assignment_id, current_user.school_id)
     return success_response(data={"message": "Assignment removed"})
 
 
 @router.get("/routes/{route_id}/students")
 async def get_students_on_route(route_id: uuid.UUID, current_user: User = Depends(require_permission("transport:read")), db: AsyncSession = Depends(get_db)):
     service = TransportService(db)
-    students = await service.get_students_on_route(route_id)
+    students = await service.get_students_on_route(route_id, current_user.school_id)
     return success_response(data={"students": [{"id": str(s.id), "student_id": str(s.student_id), "transport_type": s.transport_type.value} for s in students], "total": len(students)})
 
 

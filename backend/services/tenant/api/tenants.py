@@ -16,9 +16,9 @@ from shared.utils.exceptions import (
     FeatureNotAvailableError,
 )
 from services.auth.dependencies.auth import (
-    get_current_active_user,
     require_role,
     require_permission,
+    require_tenant_permission,
 )
 from services.auth.models.user import User
 from services.tenant.schemas.tenant import (
@@ -93,7 +93,7 @@ async def create_tenant(
 @router.get("/{tenant_id}", response_model=TenantResponse)
 async def get_tenant(
     tenant_id: uuid.UUID,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(require_tenant_permission("tenant:read")),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -147,7 +147,7 @@ async def get_tenant(
 async def update_tenant(
     tenant_id: uuid.UUID,
     tenant_data: TenantUpdate,
-    current_user: User = Depends(require_permission("tenant:update")),
+    current_user: User = Depends(require_tenant_permission("tenant:update")),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -273,7 +273,7 @@ async def list_tenants(
 async def toggle_higher_secondary(
     tenant_id: uuid.UUID,
     hs_data: HSToggleRequest,
-    current_user: User = Depends(require_permission("tenant:hs_toggle")),
+    current_user: User = Depends(require_tenant_permission("tenant:hs_toggle")),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -317,7 +317,7 @@ async def toggle_higher_secondary(
 @router.get("/{tenant_id}/subscription", response_model=SubscriptionResponse)
 async def get_subscription(
     tenant_id: uuid.UUID,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(require_tenant_permission("tenant:read")),
     db: AsyncSession = Depends(get_db)
 ):
     """

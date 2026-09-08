@@ -52,7 +52,7 @@ async def get_book(
 ):
     try:
         service = LibraryService(db)
-        book = await service.get_book(book_id)
+        book = await service.get_book(book_id, current_user.school_id)
         return BookResponse.model_validate(book)
     except RecordNotFoundError as e:
         raise HTTPException(status_code=404, detail=error_response(str(e), "NOT_FOUND"))
@@ -65,7 +65,7 @@ async def update_book(
     db: AsyncSession = Depends(get_db)
 ):
     service = LibraryService(db)
-    book = await service.update_book(book_id, data.model_dump(exclude_unset=True))
+    book = await service.update_book(book_id, data.model_dump(exclude_unset=True), current_user.school_id)
     return BookResponse.model_validate(book)
 
 
@@ -94,7 +94,7 @@ async def return_book(
 ):
     try:
         service = LibraryService(db)
-        issue = await service.return_book(data.book_issue_id, current_user.id, float(data.fine_amount))
+        issue = await service.return_book(data.book_issue_id, current_user.id, current_user.school_id, float(data.fine_amount))
         return success_response(data={"message": "Book returned", "fine_amount": float(issue.fine_amount)})
     except RecordNotFoundError as e:
         raise HTTPException(status_code=404, detail=error_response(str(e), "NOT_FOUND"))

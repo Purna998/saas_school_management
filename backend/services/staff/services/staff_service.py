@@ -102,11 +102,11 @@ class StaffService:
         logger.info(f"Staff created: {staff.full_name_en} (ID: {staff.id})")
         return staff
 
-    async def get_staff(self, staff_id: uuid.UUID) -> Staff:
+    async def get_staff(self, staff_id: uuid.UUID, school_id: uuid.UUID) -> Staff:
         """Get staff member by ID"""
         result = await self.db.execute(
             select(Staff)
-            .where(Staff.id == staff_id, Staff.is_deleted == False)
+            .where(Staff.id == staff_id, Staff.school_id == school_id, Staff.is_deleted == False)
             .options(selectinload(Staff.leaves))
         )
         staff = result.scalar_one_or_none()
@@ -118,7 +118,7 @@ class StaffService:
 
     async def update_staff(self, staff_id: uuid.UUID, data: StaffUpdate, school_id: uuid.UUID) -> Staff:
         """Update staff member details"""
-        staff = await self.get_staff(staff_id)
+        staff = await self.get_staff(staff_id, school_id)
 
         update_fields = data.model_dump(exclude_unset=True)
 
@@ -269,7 +269,7 @@ class StaffService:
             Created StaffLeave object
         """
         # Verify staff exists
-        await self.get_staff(data.staff_id)
+        await self.get_staff(data.staff_id, school_id)
 
         # Calculate days
         days = (data.end_date_ad - data.start_date_ad).days + 1
@@ -299,6 +299,7 @@ class StaffService:
         self,
         leave_id: uuid.UUID,
         approved_by: uuid.UUID,
+        school_id: uuid.UUID,
     ) -> StaffLeave:
         """
         Approve a pending leave request.
@@ -311,7 +312,7 @@ class StaffService:
             Updated StaffLeave object
         """
         result = await self.db.execute(
-            select(StaffLeave).where(StaffLeave.id == leave_id)
+            select(StaffLeave).where(StaffLeave.id == leave_id, StaffLeave.school_id == school_id)
         )
         leave = result.scalar_one_or_none()
 
@@ -334,6 +335,7 @@ class StaffService:
         self,
         leave_id: uuid.UUID,
         rejected_by: uuid.UUID,
+        school_id: uuid.UUID,
     ) -> StaffLeave:
         """
         Reject a pending leave request.
@@ -346,7 +348,7 @@ class StaffService:
             Updated StaffLeave object
         """
         result = await self.db.execute(
-            select(StaffLeave).where(StaffLeave.id == leave_id)
+            select(StaffLeave).where(StaffLeave.id == leave_id, StaffLeave.school_id == school_id)
         )
         leave = result.scalar_one_or_none()
 
@@ -436,6 +438,7 @@ class StaffService:
     async def get_staff_attendance(
         self,
         staff_id: uuid.UUID,
+        school_id: uuid.UUID,
         start_date: Optional[date] = None,
         end_date: Optional[date] = None,
         page: int = 1,
@@ -458,7 +461,8 @@ class StaffService:
         await self.get_staff(staff_id)
 
         query = select(StaffAttendance).where(
-            StaffAttendance.staff_id == staff_id
+            StaffAttendance.staff_id == staff_id,
+            StaffAttendance.school_id == school_id,
         )
 
         if start_date:
@@ -485,6 +489,7 @@ class StaffService:
     async def get_staff_attendance_summary(
         self,
         staff_id: uuid.UUID,
+        school_id: uuid.UUID,
         start_date: date,
         end_date: date,
     ) -> dict:
@@ -505,6 +510,7 @@ class StaffService:
         result = await self.db.execute(
             select(StaffAttendance).where(
                 StaffAttendance.staff_id == staff_id,
+                StaffAttendance.school_id == school_id,
                 StaffAttendance.date_ad >= start_date,
                 StaffAttendance.date_ad <= end_date,
             )

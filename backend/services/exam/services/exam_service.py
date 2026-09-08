@@ -145,9 +145,9 @@ class ExamService:
         await self.db.refresh(exam)
 
         # Reload with relationships
-        return await self.get_exam(exam.id)
+        return await self.get_exam(exam.id, school_id)
 
-    async def get_exam(self, exam_id: uuid.UUID) -> Exam:
+    async def get_exam(self, exam_id: uuid.UUID, school_id: uuid.UUID) -> Exam:
         """
         Get exam by ID with subjects loaded.
 
@@ -162,7 +162,7 @@ class ExamService:
         """
         result = await self.db.execute(
             select(Exam)
-            .where(Exam.id == exam_id, Exam.deleted_at.is_(None))
+            .where(Exam.id == exam_id, Exam.school_id == school_id, Exam.deleted_at.is_(None))
             .options(selectinload(Exam.subjects))
         )
         exam = result.scalar_one_or_none()
@@ -237,7 +237,8 @@ class ExamService:
     async def update_exam_status(
         self,
         exam_id: uuid.UUID,
-        data: ExamStatusUpdate
+        data: ExamStatusUpdate,
+        school_id: uuid.UUID,
     ) -> Exam:
         """
         Update exam status with validation.
@@ -259,7 +260,7 @@ class ExamService:
             RecordNotFoundError: If exam not found
             ValueError: If invalid status transition
         """
-        exam = await self.get_exam(exam_id)
+        exam = await self.get_exam(exam_id, school_id)
         new_status = ExamStatus(data.status)
 
         # Validate status transitions
@@ -288,7 +289,7 @@ class ExamService:
         await self.db.refresh(exam)
 
         logger.info(f"Exam {exam.name} status updated to {new_status.value}")
-        return await self.get_exam(exam.id)
+        return await self.get_exam(exam.id, school_id)
 
     # ============================================================
     # Marks Management
@@ -333,6 +334,11 @@ class ExamService:
                 f"Exam subject with ID {data.exam_subject_id} not found"
             )
 
+        if exam_subject.exam.school_id != school_id:
+            raise RecordNotFoundError(
+                f"Exam subject with ID {data.exam_subject_id} not found"
+            )
+
         # Check if exam is locked
         if exam_subject.exam.is_locked:
             raise ValueError("Cannot enter marks - exam is locked")
@@ -347,6 +353,7 @@ class ExamService:
         student_ids = [entry.student_id for entry in data.entries]
         existing_result = await self.db.execute(
             select(Mark).where(
+                Mark.school_id == school_id,
                 Mark.exam_subject_id == data.exam_subject_id,
                 Mark.student_id.in_(student_ids),
             )
@@ -399,6 +406,7 @@ class ExamService:
         await self.db.flush()
         marks_result = await self.db.execute(
             select(Mark).where(
+                Mark.school_id == school_id,
                 Mark.exam_subject_id == data.exam_subject_id,
                 Mark.student_id.in_(student_ids),
             )
@@ -416,7 +424,7 @@ class ExamService:
     # Result Calculation
     # ============================================================
 
-    async def calculate_results(self, exam_id: uuid.UUID) -> List[Result]:
+    async def calculate_results(self, exam_id: uuid.UUID, school_id: uuid.UUID) -> List[Result]:
         """
         Calculate results for all students in an exam.
 
@@ -440,7 +448,7 @@ class ExamService:
             RecordNotFoundError: If exam not found
             ValueError: If no marks exist for the exam
         """
-        exam = await self.get_exam(exam_id)
+        exam = await self.get_exam(exam_id, school_id)
 
         if exam.is_locked:
             raise ValueError("Cannot recalculate - exam results are locked/published")
@@ -458,7 +466,7 @@ class ExamService:
 
         # Get all marks for this exam
         marks_result = await self.db.execute(
-            select(Mark).where(Mark.exam_id == exam_id)
+            select(Mark).where(Mark.exam_id == exam_id, Mark.school_id == school_id)
         )
         all_marks = marks_result.scalars().all()
 
@@ -474,7 +482,7 @@ class ExamService:
 
         # Delete existing results for recalculation
         await self.db.execute(
-            delete(Result).where(Result.exam_id == exam_id)
+            delete(Result).where(Result.exam_id == exam_id, Result.school_id == school_id)
         )
 
         is_hs = exam.grade >= 11  # Higher Secondary uses percentage system
@@ -592,6 +600,7 @@ class ExamService:
         self,
         student_id: uuid.UUID,
         exam_id: uuid.UUID,
+        school_id: uuid.UUID,
     ) -> dict:
         """
         Generate a complete report card for a student.
@@ -606,13 +615,14 @@ class ExamService:
         Raises:
             RecordNotFoundError: If exam or result not found
         """
-        exam = await self.get_exam(exam_id)
+        exam = await self.get_exam(exam_id, school_id)
 
         # Get student result
         result_query = await self.db.execute(
             select(Result).where(
                 Result.exam_id == exam_id,
                 Result.student_id == student_id,
+                Result.school_id == school_id,
             )
         )
         student_result = result_query.scalar_one_or_none()
@@ -628,6 +638,7 @@ class ExamService:
             .where(
                 Mark.exam_id == exam_id,
                 Mark.student_id == student_id,
+                Mark.school_id == school_id,
             )
             .options(selectinload(Mark.exam_subject))
         )
@@ -674,7 +685,7 @@ class ExamService:
     # Publish Results
     # ============================================================
 
-    async def publish_results(self, exam_id: uuid.UUID) -> Exam:
+    async def publish_results(self, exam_id: uuid.UUID, school_id: uuid.UUID) -> Exam:
         """
         Publish exam results - locks the exam and transitions status.
 
@@ -692,7 +703,7 @@ class ExamService:
             RecordNotFoundError: If exam not found
             ValueError: If exam cannot be published
         """
-        exam = await self.get_exam(exam_id)
+        exam = await self.get_exam(exam_id, school_id)
 
         if exam.status != ExamStatus.COMPLETED:
             raise ValueError(
@@ -703,7 +714,7 @@ class ExamService:
         # Check if results exist
         result_count = await self.db.execute(
             select(func.count()).select_from(
-                select(Result).where(Result.exam_id == exam_id).subquery()
+                select(Result).where(Result.exam_id == exam_id, Result.school_id == school_id).subquery()
             )
         )
         count = result_count.scalar()
@@ -722,7 +733,7 @@ class ExamService:
         await self.db.refresh(exam)
 
         logger.info(f"Exam results published: {exam.name} ({count} results)")
-        return await self.get_exam(exam.id)
+        return await self.get_exam(exam.id, school_id)
 
     # ============================================================
     # Results Retrieval
@@ -731,6 +742,7 @@ class ExamService:
     async def get_results(
         self,
         exam_id: uuid.UUID,
+        school_id: uuid.UUID,
         page: int = 1,
         limit: int = 50,
         status_filter: Optional[str] = None,
@@ -748,9 +760,9 @@ class ExamService:
             Tuple of (results list, total count)
         """
         # Verify exam exists
-        await self.get_exam(exam_id)
+        await self.get_exam(exam_id, school_id)
 
-        query = select(Result).where(Result.exam_id == exam_id)
+        query = select(Result).where(Result.exam_id == exam_id, Result.school_id == school_id)
 
         if status_filter:
             query = query.where(Result.status == ResultStatus(status_filter))

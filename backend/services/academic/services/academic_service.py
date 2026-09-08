@@ -93,10 +93,10 @@ class AcademicService:
         await self.db.refresh(grade)
         return grade
 
-    async def get_grade(self, grade_id: uuid.UUID) -> Grade:
+    async def get_grade(self, grade_id: uuid.UUID, school_id: uuid.UUID) -> Grade:
         result = await self.db.execute(
             select(Grade)
-            .where(Grade.id == grade_id)
+            .where(Grade.id == grade_id, Grade.school_id == school_id)
             .options(selectinload(Grade.sections))
         )
         grade = result.scalar_one_or_none()
@@ -116,6 +116,7 @@ class AcademicService:
     # --- Sections ---
 
     async def create_section(self, data: SectionCreate, school_id: uuid.UUID) -> Section:
+        await self.get_grade(data.grade_id, school_id)
         section = Section(
             id=uuid.uuid4(),
             school_id=school_id,
@@ -130,19 +131,19 @@ class AcademicService:
         await self.db.refresh(section)
         return section
 
-    async def get_section(self, section_id: uuid.UUID) -> Section:
+    async def get_section(self, section_id: uuid.UUID, school_id: uuid.UUID) -> Section:
         result = await self.db.execute(
-            select(Section).where(Section.id == section_id)
+            select(Section).where(Section.id == section_id, Section.school_id == school_id)
         )
         section = result.scalar_one_or_none()
         if not section:
             raise SectionNotFoundError(str(section_id))
         return section
 
-    async def list_sections(self, grade_id: uuid.UUID) -> List[Section]:
+    async def list_sections(self, grade_id: uuid.UUID, school_id: uuid.UUID) -> List[Section]:
         result = await self.db.execute(
             select(Section)
-            .where(Section.grade_id == grade_id, Section.is_active == True)
+            .where(Section.grade_id == grade_id, Section.school_id == school_id, Section.is_active == True)
             .order_by(Section.name)
         )
         return result.scalars().all()
@@ -150,6 +151,9 @@ class AcademicService:
     # --- Subjects ---
 
     async def create_subject(self, data: SubjectCreate, school_id: uuid.UUID) -> Subject:
+        await self.get_grade(data.grade_id, school_id)
+        if data.faculty_id:
+            await self.get_faculty(data.faculty_id, school_id)
         subject = Subject(
             id=uuid.uuid4(),
             school_id=school_id,
@@ -170,17 +174,17 @@ class AcademicService:
         await self.db.refresh(subject)
         return subject
 
-    async def get_subject(self, subject_id: uuid.UUID) -> Subject:
+    async def get_subject(self, subject_id: uuid.UUID, school_id: uuid.UUID) -> Subject:
         result = await self.db.execute(
-            select(Subject).where(Subject.id == subject_id)
+            select(Subject).where(Subject.id == subject_id, Subject.school_id == school_id)
         )
         subject = result.scalar_one_or_none()
         if not subject:
             raise SubjectNotFoundError(str(subject_id))
         return subject
 
-    async def list_subjects(self, grade_id: uuid.UUID, faculty_id: Optional[uuid.UUID] = None) -> List[Subject]:
-        query = select(Subject).where(Subject.grade_id == grade_id, Subject.is_active == True)
+    async def list_subjects(self, grade_id: uuid.UUID, school_id: uuid.UUID, faculty_id: Optional[uuid.UUID] = None) -> List[Subject]:
+        query = select(Subject).where(Subject.grade_id == grade_id, Subject.school_id == school_id, Subject.is_active == True)
         if faculty_id:
             query = query.where(Subject.faculty_id == faculty_id)
         query = query.order_by(Subject.code)
@@ -190,6 +194,8 @@ class AcademicService:
     # --- Timetable ---
 
     async def create_timetable_entry(self, data: TimetableEntryCreate, school_id: uuid.UUID) -> TimetableEntry:
+        await self.get_section(data.section_id, school_id)
+        await self.get_subject(data.subject_id, school_id)
         entry = TimetableEntry(
             id=uuid.uuid4(),
             school_id=school_id,
@@ -209,10 +215,10 @@ class AcademicService:
         await self.db.refresh(entry)
         return entry
 
-    async def get_timetable(self, section_id: uuid.UUID) -> List[TimetableEntry]:
+    async def get_timetable(self, section_id: uuid.UUID, school_id: uuid.UUID) -> List[TimetableEntry]:
         result = await self.db.execute(
             select(TimetableEntry)
-            .where(TimetableEntry.section_id == section_id, TimetableEntry.is_active == True)
+            .where(TimetableEntry.section_id == section_id, TimetableEntry.school_id == school_id, TimetableEntry.is_active == True)
             .order_by(TimetableEntry.day_of_week, TimetableEntry.period_number)
         )
         return result.scalars().all()
@@ -235,10 +241,10 @@ class AcademicService:
         await self.db.refresh(faculty)
         return faculty
 
-    async def get_faculty(self, faculty_id: uuid.UUID) -> HSFaculty:
+    async def get_faculty(self, faculty_id: uuid.UUID, school_id: uuid.UUID) -> HSFaculty:
         result = await self.db.execute(
             select(HSFaculty)
-            .where(HSFaculty.id == faculty_id)
+            .where(HSFaculty.id == faculty_id, HSFaculty.school_id == school_id)
             .options(selectinload(HSFaculty.streams))
         )
         faculty = result.scalar_one_or_none()
@@ -258,6 +264,7 @@ class AcademicService:
     # --- Higher Secondary Streams ---
 
     async def create_stream(self, data: HSStreamCreate, school_id: uuid.UUID) -> HSStream:
+        await self.get_faculty(data.faculty_id, school_id)
         stream = HSStream(
             id=uuid.uuid4(),
             school_id=school_id,

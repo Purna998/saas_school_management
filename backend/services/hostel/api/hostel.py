@@ -53,7 +53,7 @@ async def allocate(data: AllocateRequest, user: User = Depends(require_permissio
 @router.post("/vacate/{allocation_id}")
 async def vacate(allocation_id: uuid.UUID, user: User = Depends(require_permission("hostel:allocate")), db: AsyncSession = Depends(get_db)):
     s = HostelService(db)
-    await s.vacate_student(allocation_id)
+    await s.vacate_student(allocation_id, user.school_id)
     return success_response(data={"message": "Student vacated"})
 
 

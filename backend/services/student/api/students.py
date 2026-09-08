@@ -102,7 +102,7 @@ async def create_student(
             school_id=current_user.school_id,
         )
         # Reload with relationships
-        student = await service.get_student(student.id)
+        student = await service.get_student(student.id, current_user.school_id)
         return _student_to_response(student)
 
     except DuplicateEMISError as e:
@@ -129,7 +129,7 @@ async def get_student(
     """
     try:
         service = StudentService(db)
-        student = await service.get_student(student_id)
+        student = await service.get_student(student_id, current_user.school_id)
         return _student_to_response(student)
 
     except StudentNotFoundError as e:
@@ -157,8 +157,8 @@ async def update_student(
     """
     try:
         service = StudentService(db)
-        student = await service.update_student(student_id, student_data)
-        student = await service.get_student(student.id)
+        student = await service.update_student(student_id, student_data, current_user.school_id)
+        student = await service.get_student(student.id, current_user.school_id)
         return _student_to_response(student)
 
     except StudentNotFoundError as e:
@@ -185,7 +185,7 @@ async def delete_student(
     """
     try:
         service = StudentService(db)
-        await service.delete_student(student_id)
+        await service.delete_student(student_id, current_user.school_id)
         return success_response(data={"message": "Student deleted successfully"})
 
     except StudentNotFoundError as e:
@@ -342,7 +342,7 @@ async def upload_student_photo(
     from shared.config.settings import settings
 
     service = StudentService(db)
-    student = await service.get_student(student_id)
+        student = await service.get_student(student_id, current_user.school_id)
 
     allowed_types = ["image/jpeg", "image/png", "image/jpg"]
     if file.content_type not in allowed_types:

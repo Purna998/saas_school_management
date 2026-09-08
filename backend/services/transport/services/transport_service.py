@@ -64,9 +64,9 @@ class TransportService:
         await self.db.refresh(route)
         return route
 
-    async def get_route(self, route_id: uuid.UUID) -> Route:
+    async def get_route(self, route_id: uuid.UUID, school_id: uuid.UUID) -> Route:
         result = await self.db.execute(
-            select(Route).where(Route.id == route_id).options(selectinload(Route.stops))
+            select(Route).where(Route.id == route_id, Route.school_id == school_id).options(selectinload(Route.stops))
         )
         route = result.scalar_one_or_none()
         if not route:
@@ -93,17 +93,17 @@ class TransportService:
         await self.db.refresh(assignment)
         return assignment
 
-    async def remove_assignment(self, assignment_id: uuid.UUID):
-        result = await self.db.execute(select(StudentTransport).where(StudentTransport.id == assignment_id))
+    async def remove_assignment(self, assignment_id: uuid.UUID, school_id: uuid.UUID):
+        result = await self.db.execute(select(StudentTransport).where(StudentTransport.id == assignment_id, StudentTransport.school_id == school_id))
         assignment = result.scalar_one_or_none()
         if not assignment:
             raise RecordNotFoundError("StudentTransport", str(assignment_id))
         assignment.is_active = False
         await self.db.commit()
 
-    async def get_students_on_route(self, route_id: uuid.UUID) -> List[StudentTransport]:
+    async def get_students_on_route(self, route_id: uuid.UUID, school_id: uuid.UUID) -> List[StudentTransport]:
         result = await self.db.execute(
-            select(StudentTransport).where(StudentTransport.route_id == route_id, StudentTransport.is_active == True)
+            select(StudentTransport).where(StudentTransport.route_id == route_id, StudentTransport.school_id == school_id, StudentTransport.is_active == True)
         )
         return result.scalars().all()
 

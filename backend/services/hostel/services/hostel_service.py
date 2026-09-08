@@ -37,7 +37,7 @@ class HostelService:
         return (await self.db.execute(query)).scalars().all()
 
     async def allocate_student(self, school_id: uuid.UUID, data: dict) -> RoomAllocation:
-        room = (await self.db.execute(select(Room).where(Room.id == data["room_id"]))).scalar_one_or_none()
+        room = (await self.db.execute(select(Room).where(Room.id == data["room_id"], Room.school_id == school_id))).scalar_one_or_none()
         if not room:
             raise RecordNotFoundError("Room", str(data["room_id"]))
         if room.occupied >= room.capacity:
@@ -50,13 +50,13 @@ class HostelService:
         await self.db.refresh(allocation)
         return allocation
 
-    async def vacate_student(self, allocation_id: uuid.UUID):
-        allocation = (await self.db.execute(select(RoomAllocation).where(RoomAllocation.id == allocation_id))).scalar_one_or_none()
+    async def vacate_student(self, allocation_id: uuid.UUID, school_id: uuid.UUID):
+        allocation = (await self.db.execute(select(RoomAllocation).where(RoomAllocation.id == allocation_id, RoomAllocation.school_id == school_id))).scalar_one_or_none()
         if not allocation:
             raise RecordNotFoundError("Allocation", str(allocation_id))
         allocation.status = AllocationStatus.VACATED
         allocation.vacated_date_ad = date.today()
-        room = (await self.db.execute(select(Room).where(Room.id == allocation.room_id))).scalar_one_or_none()
+        room = (await self.db.execute(select(Room).where(Room.id == allocation.room_id, Room.school_id == school_id))).scalar_one_or_none()
         if room and room.occupied > 0:
             room.occupied -= 1
         await self.db.commit()

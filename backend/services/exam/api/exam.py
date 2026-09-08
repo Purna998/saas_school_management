@@ -198,7 +198,7 @@ async def get_exam(
     """
     try:
         service = ExamService(db)
-        exam = await service.get_exam(exam_id)
+        exam = await service.get_exam(exam_id, current_user.school_id)
         return success_response(data=_exam_to_response(exam).model_dump(mode="json"))
 
     except RecordNotFoundError as e:
@@ -229,7 +229,7 @@ async def update_exam_status(
     """
     try:
         service = ExamService(db)
-        exam = await service.update_exam_status(exam_id, status_data)
+        exam = await service.update_exam_status(exam_id, status_data, current_user.school_id)
         return success_response(data=_exam_to_response(exam).model_dump(mode="json"))
 
     except RecordNotFoundError as e:
@@ -321,9 +321,10 @@ async def get_results(
     """
     try:
         service = ExamService(db)
-        exam = await service.get_exam(exam_id)
+        exam = await service.get_exam(exam_id, current_user.school_id)
         results, total = await service.get_results(
             exam_id=exam_id,
+            school_id=current_user.school_id,
             page=page,
             limit=limit,
             status_filter=result_status,
@@ -368,9 +369,9 @@ async def calculate_results(
     """
     try:
         service = ExamService(db)
-        results = await service.calculate_results(exam_id)
+        results = await service.calculate_results(exam_id, current_user.school_id)
 
-        exam = await service.get_exam(exam_id)
+        exam = await service.get_exam(exam_id, current_user.school_id)
         return success_response(
             data={
                 "message": f"Results calculated for {len(results)} students",
@@ -419,7 +420,7 @@ async def publish_results(
     """
     try:
         service = ExamService(db)
-        exam = await service.publish_results(exam_id)
+        exam = await service.publish_results(exam_id, current_user.school_id)
         return success_response(
             data={
                 "message": f"Results published for exam: {exam.name}",
@@ -463,7 +464,7 @@ async def get_report_card(
     """
     try:
         service = ExamService(db)
-        report = await service.get_report_card(student_id, exam_id)
+        report = await service.get_report_card(student_id, exam_id, current_user.school_id)
 
         return success_response(
             data=ReportCardResponse(

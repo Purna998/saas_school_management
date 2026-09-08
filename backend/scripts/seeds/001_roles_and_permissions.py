@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy import select
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import selectinload, sessionmaker
 
 from shared.config.settings import settings
 from services.auth.models.role import Role, Permission
@@ -92,6 +92,30 @@ DEFAULT_ROLES = [
         "is_system_role": True,
         "requires_mfa": False,
         "priority": 30,
+    },
+    {
+        "code": "transport_manager",
+        "name_en": "Transport Manager",
+        "description": "School transport management",
+        "is_system_role": True,
+        "requires_mfa": False,
+        "priority": 40,
+    },
+    {
+        "code": "hostel_manager",
+        "name_en": "Hostel Manager",
+        "description": "School hostel management",
+        "is_system_role": True,
+        "requires_mfa": False,
+        "priority": 40,
+    },
+    {
+        "code": "inventory_manager",
+        "name_en": "Inventory Manager",
+        "description": "School inventory management",
+        "is_system_role": True,
+        "requires_mfa": False,
+        "priority": 40,
     },
     {
         "code": "parent",
@@ -177,6 +201,30 @@ DEFAULT_PERMISSIONS = [
     {"code": "report:generate", "name_en": "Generate Reports", "name_np": "रिपोर्ट उत्पन्न गर्नुहोस्", "resource": "report", "action": "generate"},
     {"code": "report:export", "name_en": "Export Reports", "name_np": "रिपोर्ट निर्यात गर्नुहोस्", "resource": "report", "action": "export"},
     {"code": "report:emis", "name_en": "EMIS Reports", "name_np": "EMIS रिपोर्टहरू", "resource": "report", "action": "emis"},
+    # Permissions used by the remaining school-management services
+    {"code": "academic:create", "name_en": "Manage Academic Structure", "resource": "academic", "action": "create"},
+    {"code": "academic:read", "name_en": "View Academic Structure", "resource": "academic", "action": "read"},
+    {"code": "staff:leave:create", "name_en": "Request Staff Leave", "resource": "staff", "action": "leave_create"},
+    {"code": "staff:leave:approve", "name_en": "Approve Staff Leave", "resource": "staff", "action": "leave_approve"},
+    {"code": "staff:attendance:mark", "name_en": "Mark Staff Attendance", "resource": "staff", "action": "attendance_mark"},
+    {"code": "staff:attendance:read", "name_en": "View Staff Attendance", "resource": "staff", "action": "attendance_read"},
+    {"code": "transport:create", "name_en": "Manage Transport", "resource": "transport", "action": "create"},
+    {"code": "transport:read", "name_en": "View Transport", "resource": "transport", "action": "read"},
+    {"code": "transport:delete", "name_en": "Remove Transport Assignments", "resource": "transport", "action": "delete"},
+    {"code": "hostel:create", "name_en": "Manage Hostel Rooms", "resource": "hostel", "action": "create"},
+    {"code": "hostel:read", "name_en": "View Hostel", "resource": "hostel", "action": "read"},
+    {"code": "hostel:allocate", "name_en": "Allocate Hostel Rooms", "resource": "hostel", "action": "allocate"},
+    {"code": "inventory:create", "name_en": "Add Inventory", "resource": "inventory", "action": "create"},
+    {"code": "inventory:read", "name_en": "View Inventory", "resource": "inventory", "action": "read"},
+    {"code": "inventory:update", "name_en": "Update Inventory", "resource": "inventory", "action": "update"},
+    {"code": "report:read", "name_en": "View Reports", "resource": "report", "action": "read"},
+    {"code": "report:delete", "name_en": "Delete Reports", "resource": "report", "action": "delete"},
+    {"code": "communication:read", "name_en": "View Communications", "resource": "communication", "action": "read"},
+    {"code": "communication:email:send", "name_en": "Send Email", "resource": "communication", "action": "email_send"},
+    {"code": "communication:sms:send", "name_en": "Send SMS", "resource": "communication", "action": "sms_send"},
+    {"code": "communication:sms:bulk", "name_en": "Send Bulk SMS", "resource": "communication", "action": "sms_bulk"},
+    {"code": "calendar:read", "name_en": "View Calendar", "resource": "calendar", "action": "read"},
+    {"code": "calendar:update", "name_en": "Manage Calendar", "resource": "calendar", "action": "update"},
 ]
 
 
@@ -192,8 +240,15 @@ ROLE_PERMISSIONS = {
         "marks:create", "marks:read", "marks:update",
         "fee:create", "fee:read", "fee:collect", "fee:refund", "fee:report",
         "staff:create", "staff:read", "staff:update", "staff:delete",
+        "staff:leave:create", "staff:leave:approve", "staff:attendance:mark", "staff:attendance:read",
+        "academic:create", "academic:read",
         "library:create", "library:read", "library:update", "library:issue", "library:return",
-        "report:generate", "report:export", "report:emis",
+        "transport:create", "transport:read", "transport:delete",
+        "hostel:create", "hostel:read", "hostel:allocate",
+        "inventory:create", "inventory:read", "inventory:update",
+        "report:generate", "report:read", "report:delete", "report:export", "report:emis",
+        "communication:read", "communication:email:send", "communication:sms:send", "communication:sms:bulk",
+        "calendar:read", "calendar:update",
     ],
 
     "principal": [
@@ -204,7 +259,10 @@ ROLE_PERMISSIONS = {
         "marks:read",
         "fee:read", "fee:report",
         "staff:read",
-        "report:generate", "report:export", "report:emis",
+        "academic:create", "academic:read",
+        "communication:read", "communication:email:send", "communication:sms:send",
+        "calendar:read", "calendar:update",
+        "report:generate", "report:read", "report:export", "report:emis",
     ],
 
     "vice_principal": [
@@ -221,6 +279,7 @@ ROLE_PERMISSIONS = {
         "attendance:create", "attendance:read", "attendance:update",
         "exam:read",
         "marks:create", "marks:read", "marks:update",
+        "academic:read", "communication:read", "calendar:read",
     ],
 
     "accountant": [
@@ -233,6 +292,10 @@ ROLE_PERMISSIONS = {
         "student:read",
         "library:create", "library:read", "library:update", "library:issue", "library:return",
     ],
+
+    "transport_manager": ["transport:create", "transport:read", "transport:delete"],
+    "hostel_manager": ["hostel:create", "hostel:read", "hostel:allocate"],
+    "inventory_manager": ["inventory:create", "inventory:read", "inventory:update"],
 
     "receptionist": [
         "student:read",
@@ -265,54 +328,52 @@ async def seed_roles_and_permissions():
 
     async with async_session() as session:
         try:
-            existing_roles = (await session.execute(select(Role))).scalars().first()
-            if existing_roles:
-                print("[OK] Roles and permissions already seeded")
-                return
-
-            # Create permissions
-            print("Creating permissions...")
-            permissions_map = {}
+            # Synchronize instead of returning early so upgrades add newly
+            # introduced roles and permissions to an existing database.
+            print("Synchronizing permissions...")
+            existing_permissions = (await session.execute(select(Permission))).scalars().all()
+            permissions_map = {permission.code: permission for permission in existing_permissions}
             for perm_data in DEFAULT_PERMISSIONS:
-                permission = Permission(
-                    id=uuid.uuid4(),
-                    code=perm_data["code"],
-                    name_en=perm_data["name_en"],
-                    name_np=perm_data.get("name_np"),
-                    description=perm_data.get("description"),
-                    resource=perm_data["resource"],
-                    action=perm_data["action"],
-                    is_active=True,
-                )
-                session.add(permission)
-                permissions_map[perm_data["code"]] = permission
+                permission = permissions_map.get(perm_data["code"])
+                if permission is None:
+                    permission = Permission(id=uuid.uuid4(), code=perm_data["code"])
+                    session.add(permission)
+                    permissions_map[perm_data["code"]] = permission
+                permission.name_en = perm_data["name_en"]
+                permission.name_np = perm_data.get("name_np")
+                permission.description = perm_data.get("description")
+                permission.resource = perm_data["resource"]
+                permission.action = perm_data["action"]
+                permission.is_active = True
 
             await session.flush()
-            print(f"[OK] Created {len(DEFAULT_PERMISSIONS)} permissions")
+            print(f"[OK] Synchronized {len(DEFAULT_PERMISSIONS)} permissions")
 
-            # Create roles
-            print("\nCreating roles...")
+            print("\nSynchronizing roles...")
+            existing_roles = (
+                await session.execute(select(Role).options(selectinload(Role.permissions)))
+            ).scalars().unique().all()
+            roles_map = {role.code: role for role in existing_roles}
             for role_data in DEFAULT_ROLES:
-                role = Role(
-                    id=uuid.uuid4(),
-                    code=role_data["code"],
-                    name_en=role_data["name_en"],
-                    name_np=role_data.get("name_np"),
-                    description=role_data.get("description"),
-                    is_system_role=role_data.get("is_system_role", False),
-                    is_active=True,
-                    requires_mfa=role_data.get("requires_mfa", False),
-                    priority=role_data.get("priority", 0),
-                    permissions=[
-                        permissions_map[permission_code]
-                        for permission_code in ROLE_PERMISSIONS.get(role_data["code"], [])
-                        if permission_code in permissions_map
-                    ],
-                )
-                session.add(role)
+                role = roles_map.get(role_data["code"])
+                if role is None:
+                    role = Role(id=uuid.uuid4(), code=role_data["code"])
+                    session.add(role)
+                role.name_en = role_data["name_en"]
+                role.name_np = role_data.get("name_np")
+                role.description = role_data.get("description")
+                role.is_system_role = role_data.get("is_system_role", False)
+                role.is_active = True
+                role.requires_mfa = role_data.get("requires_mfa", False)
+                role.priority = role_data.get("priority", 0)
+                role.permissions = [
+                    permissions_map[permission_code]
+                    for permission_code in ROLE_PERMISSIONS.get(role_data["code"], [])
+                    if permission_code in permissions_map
+                ]
 
             await session.flush()
-            print(f"[OK] Created {len(DEFAULT_ROLES)} roles")
+            print(f"[OK] Synchronized {len(DEFAULT_ROLES)} roles")
 
             print("\nAssigning permissions to roles...")
             for role_code, permission_codes in ROLE_PERMISSIONS.items():
