@@ -257,7 +257,6 @@ ROLE_PERMISSIONS = {
         "attendance:read", "attendance:report",
         "exam:create", "exam:read", "exam:update", "exam:publish", "exam:lock",
         "marks:read",
-        "fee:read", "fee:report",
         "staff:read",
         "academic:create", "academic:read",
         "communication:read", "communication:email:send", "communication:sms:send",

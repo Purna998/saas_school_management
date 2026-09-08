@@ -342,7 +342,7 @@ async def upload_student_photo(
     from shared.config.settings import settings
 
     service = StudentService(db)
-        student = await service.get_student(student_id, current_user.school_id)
+    student = await service.get_student(student_id, current_user.school_id)
 
     allowed_types = ["image/jpeg", "image/png", "image/jpg"]
     if file.content_type not in allowed_types:
