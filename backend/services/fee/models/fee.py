@@ -19,8 +19,10 @@ from sqlalchemy import (
     Enum,
     ForeignKey,
     Index,
+    CheckConstraint,
+    text,
 )
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import relationship
 
 from shared.database.base import Base
@@ -73,6 +75,7 @@ class FeeStructure(Base, BaseModel, TimestampMixin, TenantMixin):
     __table_args__ = (
         Index("idx_fee_structures_school_year", "school_id", "academic_year_bs"),
         Index("idx_fee_structures_school_grade", "school_id", "grade"),
+        Index("uq_fee_structure_active", "school_id", "academic_year_bs", "grade", unique=True, postgresql_where=text("is_active")),
     )
 
     academic_year_bs = Column(
@@ -115,6 +118,8 @@ class FeeHead(Base, BaseModel, TimestampMixin):
     __tablename__ = "fee_heads"
     __table_args__ = (
         Index("idx_fee_heads_structure", "fee_structure_id"),
+        Index("uq_fee_head_name", "fee_structure_id", text("lower(name)"), unique=True),
+        CheckConstraint("amount > 0", name="ck_fee_head_amount"),
     )
 
     fee_structure_id = Column(
@@ -147,7 +152,7 @@ class FeeHead(Base, BaseModel, TimestampMixin):
 
     # Relationships
     fee_structure = relationship("FeeStructure", back_populates="fee_heads")
-    ledger_entries = relationship("FeeLedger", back_populates="fee_head", lazy="selectin")
+    ledger_entries = relationship("FeeLedger", back_populates="fee_head", lazy="raise")
 
 
 class FeeLedger(Base, BaseModel, TimestampMixin, TenantMixin):
@@ -162,7 +167,16 @@ class FeeLedger(Base, BaseModel, TimestampMixin, TenantMixin):
         Index("idx_fee_ledger_status", "school_id", "status"),
         Index("idx_fee_ledger_due_date", "due_date_ad"),
         Index("idx_fee_ledger_year_month", "academic_year_bs", "month_bs"),
+        Index("uq_fee_ledger_period", "school_id", "student_id", "fee_head_id", "academic_year_bs", text("coalesce(month_bs, '')"), unique=True),
+        Index("ix_fee_ledger_school_year_due", "school_id", "academic_year_bs", "due_date_ad"),
+        CheckConstraint("amount_due >= 0 AND amount_paid >= 0 AND balance >= 0", name="ck_fee_ledger_nonnegative"),
+        CheckConstraint("balance = amount_due - amount_paid", name="ck_fee_ledger_balance"),
+        CheckConstraint("original_amount >= amount_due AND discount_amount = original_amount - amount_due", name="ck_fee_ledger_discount"),
     )
+
+    fee_head_name = Column(String(100), nullable=False)
+    original_amount = Column(Numeric(12, 2), nullable=False)
+    discount_amount = Column(Numeric(12, 2), nullable=False, default=Decimal("0.00"))
 
     student_id = Column(
         UUID(as_uuid=True),
@@ -217,7 +231,7 @@ class FeeLedger(Base, BaseModel, TimestampMixin, TenantMixin):
 
     # Relationships
     fee_head = relationship("FeeHead", back_populates="ledger_entries")
-    payments = relationship("FeePayment", back_populates="ledger", lazy="selectin")
+    payments = relationship("FeePayment", back_populates="ledger", lazy="raise")
 
 
 class FeePayment(Base, BaseModel, TimestampMixin, TenantMixin):
@@ -231,7 +245,14 @@ class FeePayment(Base, BaseModel, TimestampMixin, TenantMixin):
         Index("idx_fee_payments_student", "school_id", "student_id"),
         Index("idx_fee_payments_receipt", "receipt_number", unique=True),
         Index("idx_fee_payments_date", "paid_date_ad"),
+        Index("uq_fee_payment_request", "school_id", "request_id", unique=True),
+        CheckConstraint("amount > 0 AND refunded_amount >= 0 AND refunded_amount <= amount", name="ck_fee_payment_amount"),
     )
+
+    request_id = Column(UUID(as_uuid=True), nullable=True)
+    reference = Column(String(100), nullable=True)
+    balance_after = Column(Numeric(12, 2), nullable=True)
+    refunded_amount = Column(Numeric(12, 2), nullable=False, default=Decimal("0.00"))
 
     student_id = Column(
         UUID(as_uuid=True),
@@ -283,6 +304,31 @@ class FeePayment(Base, BaseModel, TimestampMixin, TenantMixin):
 
     # Relationships
     ledger = relationship("FeeLedger", back_populates="payments")
+    refunds = relationship("FeeRefund", back_populates="payment", lazy="raise")
+
+
+class FeeRefund(Base, BaseModel, TimestampMixin, TenantMixin):
+    """Append-only record of money returned against an existing payment."""
+
+    __tablename__ = "fee_refunds"
+    __table_args__ = (
+        Index("uq_fee_refund_request", "school_id", "request_id", unique=True),
+        Index("ix_fee_refund_payment", "school_id", "payment_id"),
+        CheckConstraint("amount > 0", name="ck_fee_refund_amount"),
+    )
+
+    payment_id = Column(UUID(as_uuid=True), ForeignKey("fee_payments.id", ondelete="RESTRICT"), nullable=False)
+    student_id = Column(UUID(as_uuid=True), nullable=False)
+    request_id = Column(UUID(as_uuid=True), nullable=False)
+    amount = Column(Numeric(12, 2), nullable=False)
+    payment_method = Column(Enum(PaymentMethod, name="payment_method_enum"), nullable=False)
+    reference = Column(String(100), nullable=True)
+    reason = Column(String(500), nullable=False)
+    refund_number = Column(String(30), unique=True, nullable=False)
+    refunded_date_ad = Column(Date, nullable=False)
+    refunded_date_bs = Column(String(10), nullable=False)
+    refunded_by = Column(UUID(as_uuid=True), nullable=False)
+    payment = relationship("FeePayment", back_populates="refunds")
 
 
 class Scholarship(Base, BaseModel, TimestampMixin, TenantMixin):
@@ -295,7 +341,16 @@ class Scholarship(Base, BaseModel, TimestampMixin, TenantMixin):
     __table_args__ = (
         Index("idx_scholarships_student", "school_id", "student_id"),
         Index("idx_scholarships_year", "school_id", "academic_year_bs"),
+        Index("uq_fee_scholarship_request", "school_id", "request_id", unique=True),
     )
+
+    request_id = Column(UUID(as_uuid=True), nullable=True)
+    applied_amount = Column(Numeric(12, 2), nullable=False, default=Decimal("0.00"))
+    applied_by = Column(UUID(as_uuid=True), nullable=True)
+    reversed_by = Column(UUID(as_uuid=True), nullable=True)
+    reversed_at = Column(DateTime(timezone=True), nullable=True)
+    reversal_reason = Column(String(500), nullable=True)
+    requested_ledger_ids = Column(JSONB, nullable=True)
 
     student_id = Column(
         UUID(as_uuid=True),
@@ -329,3 +384,16 @@ class Scholarship(Base, BaseModel, TimestampMixin, TenantMixin):
         nullable=False,
         index=True,
     )
+
+
+class FeeDiscountAllocation(Base, BaseModel, TimestampMixin, TenantMixin):
+    """Immutable bill-level evidence for a concession, retained on reversal."""
+
+    __tablename__ = "fee_discount_allocations"
+    __table_args__ = (
+        Index("ix_fee_discount_scholarship", "school_id", "scholarship_id"),
+        CheckConstraint("amount > 0", name="ck_fee_discount_amount"),
+    )
+    scholarship_id = Column(UUID(as_uuid=True), ForeignKey("scholarships.id", ondelete="RESTRICT"), nullable=False)
+    ledger_id = Column(UUID(as_uuid=True), ForeignKey("fee_ledger.id", ondelete="RESTRICT"), nullable=False)
+    amount = Column(Numeric(12, 2), nullable=False)

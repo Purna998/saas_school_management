@@ -47,7 +47,7 @@ export function FeeCollectionChart({ data }: { data: { name: string; value: numb
   const total = data.reduce((sum, item) => sum + item.value, 0);
   const collected = total ? Math.round(((data.find((item) => item.name === 'Collected')?.value ?? 0) / total) * 1000) / 10 : 0;
   return (
-    <div className="relative" role="img" aria-label={`Sample fee collection: ${collected}% collected. ${data.map((item) => `${item.name}, NPR ${item.value.toLocaleString()}`).join('; ')}`}>
+    <div className="relative" role="img" aria-label={`Fee collection: ${collected}% collected. ${data.map((item) => `${item.name}, NPR ${item.value.toLocaleString()}`).join('; ')}`}>
       <ResponsiveContainer width="100%" height={215}>
         <PieChart>
           <Pie data={data} cx="50%" cy="50%" innerRadius={72} outerRadius={95} paddingAngle={5} cornerRadius={12} startAngle={90} endAngle={-270} stroke="none" dataKey="value">

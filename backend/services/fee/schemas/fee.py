@@ -1,330 +1,278 @@
-"""
-Nepal School Management System - Fee Service Schemas
-Pydantic request/response models for fee management
-"""
+"""Validated requests and decimal-valued accounting responses."""
 
+import re
 import uuid
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Optional, List
-
-from pydantic import BaseModel, Field, field_validator
-
-from services.fee.models.fee import FeeFrequency, FeeStatus, PaymentMethod, DiscountType
-
-
-# ─── Fee Structure Schemas ───────────────────────────────────────────────────
+from typing import Annotated, Optional
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
+from services.fee.models.fee import DiscountType, FeeFrequency, FeeStatus, PaymentMethod
+from shared.utils.nepali_calendar import NepalCalendar
 
 
-class FeeHeadCreate(BaseModel):
-    """Schema for creating a fee head"""
-
-    name: str = Field(
-        ...,
-        min_length=1,
-        max_length=100,
-        description="Fee head name (e.g. 'Tuition', 'Exam Fee')",
-        examples=["Tuition Fee"],
-    )
-    amount: Decimal = Field(
-        ...,
-        gt=0,
-        max_digits=12,
-        decimal_places=2,
-        description="Fee amount in NPR",
-        examples=[1500.00],
-    )
-    frequency: FeeFrequency = Field(
-        ...,
-        description="Payment frequency",
-        examples=["monthly"],
-    )
-    is_optional: bool = Field(
-        default=False,
-        description="Whether the fee is optional",
-    )
+def normalize_academic_year(value: str) -> str:
+    value = value.strip()
+    if not re.fullmatch(r"\d{4}(?:/\d{3,4})?", value):
+        raise ValueError("Use a BS academic year such as 2083 or 2083/084")
+    year = int(value[:4])
+    if "/" in value and int(value.split("/")[1]) not in (year + 1, (year + 1) % 1000):
+        raise ValueError("The second year must follow the first year")
+    NepalCalendar.bs_to_ad(f"{year}-01-01")
+    return f"{year}/{(year + 1) % 1000:03d}"
 
 
-class FeeHeadResponse(BaseModel):
-    """Schema for fee head response"""
+AcademicYear = Annotated[str, AfterValidator(normalize_academic_year)]
+PositiveMoney = Annotated[Decimal, Field(gt=0, max_digits=12, decimal_places=2)]
 
+
+class FeeSchema(BaseModel):
+    model_config = ConfigDict(from_attributes=True, str_strip_whitespace=True)
+
+
+class FeeHeadCreate(FeeSchema):
+    name: str = Field(min_length=1, max_length=100)
+    amount: PositiveMoney
+    frequency: FeeFrequency = FeeFrequency.monthly
+    is_optional: bool = False
+
+
+class FeeHeadResponse(FeeHeadCreate):
     id: uuid.UUID
     fee_structure_id: uuid.UUID
-    name: str
-    amount: Decimal
-    frequency: FeeFrequency
-    is_optional: bool
     created_at: datetime
-
-    class Config:
-        from_attributes = True
+    is_billed: bool = False
 
 
-class FeeStructureCreate(BaseModel):
-    """Schema for creating a fee structure"""
+class FeeStructureCreate(FeeSchema):
+    academic_year_bs: AcademicYear
+    grade: str = Field(min_length=1, max_length=20)
+    name: str = Field(min_length=1, max_length=150)
+    description: Optional[str] = Field(default=None, max_length=2000)
+    fee_heads: list[FeeHeadCreate] = Field(default_factory=list, max_length=50)
 
-    academic_year_bs: str = Field(
-        ...,
-        min_length=7,
-        max_length=9,
-        description="Academic year in BS (e.g. '2081/082')",
-        examples=["2081/082"],
-    )
-    grade: str = Field(
-        ...,
-        min_length=1,
-        max_length=20,
-        description="Grade/class",
-        examples=["10"],
-    )
-    name: str = Field(
-        ...,
-        min_length=1,
-        max_length=150,
-        description="Fee structure name",
-        examples=["Grade 10 Regular Fee 2081"],
-    )
-    description: Optional[str] = Field(
-        default=None,
-        description="Optional description",
-    )
-    fee_heads: Optional[List[FeeHeadCreate]] = Field(
-        default=None,
-        description="Optional list of fee heads to create with the structure",
-    )
+    @model_validator(mode="after")
+    def distinct_heads(self):
+        names = [head.name.casefold() for head in self.fee_heads]
+        if len(names) != len(set(names)):
+            raise ValueError("Fee head names must be unique within a structure")
+        if self.grade.isdigit():
+            self.grade = str(int(self.grade))
+            if not 1 <= int(self.grade) <= 12:
+                raise ValueError("Numeric grades must be between 1 and 12")
+        return self
 
 
-class FeeStructureResponse(BaseModel):
-    """Schema for fee structure response"""
+class FeeStructureUpdate(FeeSchema):
+    name: Optional[str] = Field(default=None, min_length=1, max_length=150)
+    description: Optional[str] = Field(default=None, max_length=2000)
+    is_active: Optional[bool] = None
 
+    @model_validator(mode="after")
+    def non_null_required_fields(self):
+        if "name" in self.model_fields_set and self.name is None:
+            raise ValueError("Name cannot be empty")
+        if "is_active" in self.model_fields_set and self.is_active is None:
+            raise ValueError("Active status cannot be empty")
+        return self
+
+
+class FeeStructureResponse(FeeSchema):
     id: uuid.UUID
     school_id: uuid.UUID
     academic_year_bs: str
     grade: str
     name: str
-    description: Optional[str]
+    description: Optional[str] = None
     is_active: bool
-    fee_heads: List[FeeHeadResponse] = []
+    fee_heads: list[FeeHeadResponse] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+
+class GenerateLedgerRequest(FeeSchema):
+    academic_year_bs: AcademicYear
+    grade: str = Field(min_length=1, max_length=20)
+    student_ids: list[uuid.UUID] = Field(min_length=1, max_length=2000)
+    fee_structure_id: Optional[uuid.UUID] = None
+    months: list[int] = Field(default_factory=lambda: list(range(1, 13)), min_length=1, max_length=12)
+    optional_head_ids: list[uuid.UUID] = Field(default_factory=list, max_length=50)
+    due_day_bs: int = Field(default=10, ge=1, le=28)
+
+    @model_validator(mode="after")
+    def valid_selection(self):
+        if self.grade.isdigit():
+            self.grade = str(int(self.grade))
+            if not 1 <= int(self.grade) <= 12:
+                raise ValueError("Numeric grades must be between 1 and 12")
+        if len(set(self.student_ids)) != len(self.student_ids):
+            raise ValueError("Select each student only once")
+        if len(set(self.months)) != len(self.months) or any(month < 1 or month > 12 for month in self.months):
+            raise ValueError("Select distinct BS months between 1 and 12")
+        if len(set(self.optional_head_ids)) != len(self.optional_head_ids):
+            raise ValueError("Select each optional fee only once")
+        return self
 
 
-# ─── Fee Payment Schemas ─────────────────────────────────────────────────────
+class FeePaymentRequest(FeeSchema):
+    student_id: uuid.UUID
+    ledger_id: Optional[uuid.UUID] = None
+    fee_head_id: Optional[uuid.UUID] = None
+    amount: PositiveMoney
+    payment_method: PaymentMethod = PaymentMethod.cash
+    reference: Optional[str] = Field(default=None, max_length=100)
+    remarks: Optional[str] = Field(default=None, max_length=500)
+    request_id: uuid.UUID = Field(default_factory=uuid.uuid4)
+
+    @model_validator(mode="after")
+    def validate_payment(self):
+        if self.ledger_id is None and self.fee_head_id is None:
+            raise ValueError("Select the bill being paid")
+        if self.payment_method != PaymentMethod.cash and not self.reference:
+            raise ValueError("A bank transaction or cheque reference is required")
+        return self
 
 
-class FeePaymentRequest(BaseModel):
-    """Schema for recording a fee payment"""
+class FeeRefundRequest(FeeSchema):
+    amount: PositiveMoney
+    reason: str = Field(min_length=3, max_length=500)
+    payment_method: PaymentMethod = PaymentMethod.cash
+    reference: Optional[str] = Field(default=None, max_length=100)
+    request_id: uuid.UUID = Field(default_factory=uuid.uuid4)
 
-    student_id: uuid.UUID = Field(
-        ...,
-        description="Student UUID",
-    )
-    fee_head_id: uuid.UUID = Field(
-        ...,
-        description="Fee head UUID (identifies what is being paid)",
-    )
-    amount: Decimal = Field(
-        ...,
-        gt=0,
-        max_digits=12,
-        decimal_places=2,
-        description="Payment amount in NPR",
-        examples=[1500.00],
-    )
-    payment_method: PaymentMethod = Field(
-        default=PaymentMethod.cash,
-        description="Payment method",
-    )
-    remarks: Optional[str] = Field(
-        default=None,
-        max_length=500,
-        description="Additional payment remarks",
-    )
+    @model_validator(mode="after")
+    def validate_reference(self):
+        if self.payment_method != PaymentMethod.cash and not self.reference:
+            raise ValueError("A bank transaction or cheque reference is required")
+        return self
 
 
-class FeePaymentResponse(BaseModel):
-    """Schema for fee payment response"""
+class FeeRefundResponse(FeeSchema):
+    id: uuid.UUID
+    payment_id: uuid.UUID
+    student_id: uuid.UUID
+    amount: Decimal
+    payment_method: PaymentMethod
+    reference: Optional[str] = None
+    reason: str
+    refund_number: str
+    refunded_date_ad: date
+    refunded_date_bs: str
+    refunded_by: uuid.UUID
+    created_at: datetime
 
+
+class FeePaymentResponse(FeeSchema):
     id: uuid.UUID
     school_id: uuid.UUID
     student_id: uuid.UUID
     ledger_id: uuid.UUID
     amount: Decimal
+    refunded_amount: Decimal = Decimal("0.00")
     payment_method: PaymentMethod
+    reference: Optional[str] = None
     receipt_number: str
     paid_date_ad: date
-    paid_date_bs: Optional[str]
+    paid_date_bs: Optional[str] = None
     received_by: uuid.UUID
-    remarks: Optional[str]
+    remarks: Optional[str] = None
+    balance_after: Optional[Decimal] = None
     created_at: datetime
 
-    class Config:
-        from_attributes = True
 
-
-# ─── Ledger Schemas ──────────────────────────────────────────────────────────
-
-
-class LedgerEntryResponse(BaseModel):
-    """Schema for a single ledger entry"""
-
+class LedgerEntryResponse(FeeSchema):
     id: uuid.UUID
     student_id: uuid.UUID
     fee_head_id: uuid.UUID
-    fee_head_name: Optional[str] = None
+    fee_head_name: str
     academic_year_bs: str
-    month_bs: Optional[str]
+    month_bs: Optional[str] = None
+    original_amount: Decimal
+    discount_amount: Decimal
     amount_due: Decimal
     amount_paid: Decimal
     balance: Decimal
     due_date_ad: date
+    due_date_bs: str
     status: FeeStatus
-    payments: List[FeePaymentResponse] = []
-
-    class Config:
-        from_attributes = True
+    payments: list[FeePaymentResponse] = Field(default_factory=list)
 
 
-class GenerateLedgerRequest(BaseModel):
-    """Schema for generating ledger entries for a grade"""
-
-    academic_year_bs: str = Field(
-        ...,
-        min_length=7,
-        max_length=9,
-        description="Academic year in BS",
-        examples=["2081/082"],
-    )
-    grade: str = Field(
-        ...,
-        min_length=1,
-        max_length=20,
-        description="Grade/class",
-        examples=["10"],
-    )
-    student_ids: List[uuid.UUID] = Field(
-        ...,
-        min_length=1,
-        description="List of student UUIDs to generate ledger entries for",
-    )
-
-
-# ─── Student Fee Status Schemas ──────────────────────────────────────────────
-
-
-class StudentFeeStatusResponse(BaseModel):
-    """Schema for complete fee status of a student"""
-
+class StudentFeeStatusResponse(FeeSchema):
     student_id: uuid.UUID
+    student_name: str
     academic_year_bs: str
+    total_original: Decimal
+    total_discount: Decimal
     total_due: Decimal
     total_paid: Decimal
     total_balance: Decimal
-    ledger_entries: List[LedgerEntryResponse]
+    ledger_entries: list[LedgerEntryResponse]
 
 
-# ─── Outstanding Fees Schemas ────────────────────────────────────────────────
-
-
-class StudentOutstandingEntry(BaseModel):
-    """Schema for a student's outstanding fees summary"""
-
+class StudentOutstandingEntry(FeeSchema):
     student_id: uuid.UUID
+    student_name: str
+    grade: Optional[int] = None
+    section: Optional[str] = None
     total_due: Decimal
     total_paid: Decimal
     total_balance: Decimal
     overdue_count: int
 
 
-class OutstandingFeesResponse(BaseModel):
-    """Schema for outstanding fees report"""
-
+class OutstandingFeesResponse(FeeSchema):
     school_id: uuid.UUID
-    grade: Optional[str]
-    section: Optional[str]
+    grade: Optional[str] = None
+    section: Optional[str] = None
+    academic_year_bs: Optional[str] = None
     total_outstanding: Decimal
     student_count: int
-    students: List[StudentOutstandingEntry]
+    page: int = 1
+    limit: int = 20
+    students: list[StudentOutstandingEntry]
 
 
-# ─── Fee Collection Summary Schemas ──────────────────────────────────────────
-
-
-class MonthlyCollectionEntry(BaseModel):
-    """Schema for monthly fee collection"""
-
+class MonthlyCollectionEntry(FeeSchema):
     month_bs: str
     total_collected: Decimal
     total_pending: Decimal
     payment_count: int
 
 
-class FeeCollectionSummaryResponse(BaseModel):
-    """Schema for fee collection summary"""
-
+class FeeCollectionSummaryResponse(FeeSchema):
     school_id: uuid.UUID
     academic_year_bs: str
+    total_original: Decimal
+    total_discount: Decimal
+    total_due: Decimal
+    gross_collected: Decimal
+    total_refunded: Decimal
     total_collected: Decimal
     total_pending: Decimal
     total_overdue: Decimal
-    collection_rate: Decimal = Field(description="Collection rate as percentage")
-    monthly_breakdown: List[MonthlyCollectionEntry]
+    collection_rate: Decimal
+    monthly_breakdown: list[MonthlyCollectionEntry]
 
 
-# ─── Scholarship Schemas ─────────────────────────────────────────────────────
+class ScholarshipCreate(FeeSchema):
+    student_id: uuid.UUID
+    name: str = Field(min_length=1, max_length=150)
+    discount_type: DiscountType
+    discount_value: PositiveMoney
+    academic_year_bs: AcademicYear
+    request_id: uuid.UUID = Field(default_factory=uuid.uuid4)
+    ledger_ids: Optional[list[uuid.UUID]] = Field(default=None, min_length=1, max_length=1000)
+
+    @model_validator(mode="after")
+    def percentage_limit(self):
+        if self.discount_type == DiscountType.percentage and self.discount_value > 100:
+            raise ValueError("Percentage discount cannot exceed 100%")
+        if self.ledger_ids is not None and len(set(self.ledger_ids)) != len(self.ledger_ids):
+            raise ValueError("Select each bill only once")
+        return self
 
 
-class ScholarshipCreate(BaseModel):
-    """Schema for applying a scholarship"""
-
-    student_id: uuid.UUID = Field(
-        ...,
-        description="Student UUID",
-    )
-    name: str = Field(
-        ...,
-        min_length=1,
-        max_length=150,
-        description="Scholarship name",
-        examples=["Merit Scholarship"],
-    )
-    discount_type: DiscountType = Field(
-        ...,
-        description="Discount type: percentage or fixed",
-    )
-    discount_value: Decimal = Field(
-        ...,
-        gt=0,
-        max_digits=12,
-        decimal_places=2,
-        description="Discount value (percentage 0-100 or fixed NPR amount)",
-        examples=[25.00],
-    )
-    academic_year_bs: str = Field(
-        ...,
-        min_length=7,
-        max_length=9,
-        description="Academic year in BS",
-        examples=["2081/082"],
-    )
-
-    @field_validator("discount_value")
-    @classmethod
-    def validate_discount_value(cls, v, info):
-        """Validate that percentage is between 0 and 100"""
-        # Note: We can only validate range for percentage after knowing discount_type.
-        # Full cross-field validation is done in the service layer.
-        if v <= 0:
-            raise ValueError("Discount value must be positive")
-        return v
-
-
-class ScholarshipResponse(BaseModel):
-    """Schema for scholarship response"""
-
+class ScholarshipResponse(FeeSchema):
     id: uuid.UUID
     school_id: uuid.UUID
     student_id: uuid.UUID
@@ -332,8 +280,14 @@ class ScholarshipResponse(BaseModel):
     discount_type: DiscountType
     discount_value: Decimal
     academic_year_bs: str
+    applied_amount: Decimal
+    applied_by: Optional[uuid.UUID] = None
+    reversed_by: Optional[uuid.UUID] = None
+    reversed_at: Optional[datetime] = None
+    reversal_reason: Optional[str] = None
     is_active: bool
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+
+class ScholarshipReversalRequest(FeeSchema):
+    reason: str = Field(min_length=3, max_length=500)

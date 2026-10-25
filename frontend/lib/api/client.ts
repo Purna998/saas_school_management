@@ -1,3 +1,5 @@
+import type { BillingResult, FeeAward, FeeHead, FeePayment, FeeReceipt, FeeRefund, FeeStatement, FeeStructure, FeeStudent, FeeSummary, OutstandingFees } from './fees';
+
 export interface ApiResponse<T = unknown> {
   success: boolean;
   data: T;
@@ -110,7 +112,12 @@ function normalizeResponse<T>(payload: unknown, ok: boolean): ApiResponse<T> {
     data: null as T,
     error: {
       code: 'HTTP_ERROR',
-      message: typeof detail === 'string' ? detail : 'Request failed',
+      message: typeof detail === 'string' ? detail : Array.isArray(detail)
+        ? detail.slice(0, 3).map((issue: { loc?: Array<string | number>; msg?: string }) => {
+          const field = issue.loc?.at(-1);
+          const label = typeof field === 'string' ? `${field.replaceAll('_', ' ')}: ` : '';
+          return `${label}${(issue.msg ?? 'Invalid value').replace(/^Value error,\s*/, '')}`;
+        }).join('; ') : 'Request failed',
       details: detail,
     },
   };
@@ -348,11 +355,26 @@ class ApiClient {
 
   fees = {
     structures: {
-      list: () => this.request('fee', { path: '/api/v1/fees/structures' }),
-      create: (data: unknown) => this.request('fee', { method: 'POST', path: '/api/v1/fees/structures', data }),
+      list: (params?: QueryParams) => this.request<FeeStructure[]>('fee', { path: '/api/v1/fees/structures', params }),
+      create: (data: unknown) => this.request<FeeStructure>('fee', { method: 'POST', path: '/api/v1/fees/structures', data }),
+      update: (id: string, data: unknown) => this.request<FeeStructure>('fee', { method: 'PATCH', path: `/api/v1/fees/structures/${id}`, data }),
+      addHead: (id: string, data: unknown) => this.request<FeeHead>('fee', { method: 'POST', path: `/api/v1/fees/structures/${id}/heads`, data }),
+      updateHead: (id: string, headId: string, data: unknown) => this.request<FeeHead>('fee', { method: 'PUT', path: `/api/v1/fees/structures/${id}/heads/${headId}`, data }),
+      deleteHead: (id: string, headId: string) => this.request('fee', { method: 'DELETE', path: `/api/v1/fees/structures/${id}/heads/${headId}` }),
     },
-    collect: (data: unknown) => this.request('fee', { method: 'POST', path: '/api/v1/fees/collect', data }),
-    ledger: (studentId: string) => this.request('fee', { path: `/api/v1/fees/students/${studentId}/ledger` }),
+    students: (params?: QueryParams) => this.request<FeeStudent[]>('fee', { path: '/api/v1/fees/students', params }),
+    roster: (grade: number, section?: string) => this.request<StudentRoster>('fee', { path: '/api/v1/fees/roster', params: { grade, section } }),
+    generate: (data: unknown) => this.request<BillingResult>('fee', { method: 'POST', path: '/api/v1/fees/generate-ledger', data }),
+    collect: (data: unknown) => this.request<FeePayment>('fee', { method: 'POST', path: '/api/v1/fees/collect', data }),
+    ledger: (studentId: string, year?: string) => this.request<FeeStatement>('fee', { path: `/api/v1/fees/student/${studentId}`, params: { academic_year_bs: year } }),
+    payments: (params?: QueryParams) => this.request<{ payments: FeePayment[]; total: number; page: number; limit: number }>('fee', { path: '/api/v1/fees/payments', params }),
+    receipt: (id: string) => this.request<FeeReceipt>('fee', { path: `/api/v1/fees/payments/${id}/receipt` }),
+    refund: (id: string, data: unknown) => this.request<FeeRefund>('fee', { method: 'POST', path: `/api/v1/fees/payments/${id}/refunds`, data }),
+    summary: (year: string) => this.request<FeeSummary>('fee', { path: '/api/v1/fees/collection-summary', params: { academic_year_bs: year } }),
+    outstanding: (params?: QueryParams) => this.request<OutstandingFees>('fee', { path: '/api/v1/fees/outstanding', params }),
+    scholarships: (params?: QueryParams) => this.request<{ scholarships: FeeAward[]; total: number; page: number; limit: number }>('fee', { path: '/api/v1/fees/scholarships', params }),
+    award: (data: unknown) => this.request<FeeAward>('fee', { method: 'POST', path: '/api/v1/fees/scholarships', data }),
+    reverseAward: (id: string, reason: string) => this.request<FeeAward>('fee', { method: 'POST', path: `/api/v1/fees/scholarships/${id}/reverse`, data: { reason } }),
   };
 
   library = {

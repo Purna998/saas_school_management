@@ -97,3 +97,6 @@ On macOS/Linux, use `backend/.venv/bin/python` for the test command.
 
 Performance changes, benchmark results, deployment steps and the Nepal academic
 workflow review are documented in [docs/performance-review.md](docs/performance-review.md).
+
+The completed school fee workflow, permissions, and accounting rules are documented
+in [docs/fees-and-payments.md](docs/fees-and-payments.md).
