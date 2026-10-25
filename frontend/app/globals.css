@@ -97,6 +97,12 @@
 .pastel-summary > :nth-child(4n+4) { background: #e9faef; border-color: transparent; }
 
 @media print {
+  body:has(#library-slip) > :not([data-ui="dialog"]) { display: none !important; }
+  body:has(#library-slip) [data-ui="dialog"] { position: static !important; transform: none !important; width: 100% !important; max-width: none !important; max-height: none !important; overflow: visible !important; border: 0 !important; box-shadow: none !important; padding: 0 !important; }
+  body:has(#library-slip) [data-ui="dialog"] > :not(#library-slip) { display: none !important; }
+  #library-slip { color: #000; background: #fff; border: 0; }
+  #library-slip dl { display: grid; grid-template-columns: 1fr 1fr; }
+  #library-slip header, #library-slip dl > div { break-inside: avoid; }
   body:has(#fee-receipt) > :not([data-ui="dialog"]) { display: none !important; }
   body:has(#fee-receipt) [data-ui="dialog"] { position: static !important; transform: none !important; width: 100% !important; max-width: none !important; max-height: none !important; overflow: visible !important; border: 0 !important; box-shadow: none !important; padding: 0 !important; }
   body:has(#fee-receipt) [data-ui="dialog"] > :not(#fee-receipt) { display: none !important; }

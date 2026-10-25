@@ -1,11 +1,10 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { ArrowLeft, BarChart3, BookOpen, Bus, Calendar, Home, MessageSquare, Package, Settings } from 'lucide-react';
+import { ArrowLeft, BarChart3, Bus, Calendar, Home, MessageSquare, Package, Settings } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
 // Keep unfinished modules in the shared workspace instead of sending users to a 404.
 const sections = {
-  library: { title: 'Library', description: 'A home for your books, readers, and everyday discoveries.', icon: BookOpen },
   transport: { title: 'Transport', description: 'Keep school journeys and transport arrangements together.', icon: Bus },
   hostel: { title: 'Hostel', description: 'Bring student accommodation and hostel details into one place.', icon: Home },
   inventory: { title: 'Inventory', description: 'Keep track of the resources that keep your school moving.', icon: Package },

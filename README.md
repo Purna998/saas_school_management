@@ -100,3 +100,6 @@ workflow review are documented in [docs/performance-review.md](docs/performance-
 
 The completed school fee workflow, permissions, and accounting rules are documented
 in [docs/fees-and-payments.md](docs/fees-and-payments.md).
+
+The completed library workflow, lending rules, copy inventory, permissions and
+migration are documented in [docs/library.md](docs/library.md).

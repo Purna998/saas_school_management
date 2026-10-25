@@ -7,6 +7,7 @@ import { useAuthStore } from '@/lib/store/auth';
 import { getNavigation, roleLabel } from '@/components/layout/navigation';
 import { AttendanceTrendChart, StudentsByGradeChart } from './DashboardChartLoaders';
 import { FeeOverviewCard, useCurrentFeeSummary } from '@/components/fees/FeeOverviewCard';
+import { useLibraryStats } from '@/components/library/useLibraryStats';
 
 const studentsByGrade = [
   { grade: 'Nursery', count: 45 }, { grade: 'LKG', count: 52 }, { grade: 'UKG', count: 48 },
@@ -27,7 +28,7 @@ const statCards = [
 ];
 const snapshots = [
   { label: "Today's attendance", description: 'Students present across all classes', value: '94.2%', icon: ClipboardCheck, tone: 'bg-[#e8f8ee] text-[#5abc7b]' },
-  { label: 'Library books issued', description: 'Learning beyond the classroom', value: '342', icon: BookOpen, tone: 'bg-[#e7f5fd] text-[#53b3df]' },
+  { label: 'Library books issued', description: 'Current school loans · Live library', value: '—', icon: BookOpen, tone: 'bg-[#e7f5fd] text-[#53b3df]' },
   { label: 'New admissions', description: 'Students welcomed this month', value: '28', icon: Users, tone: 'bg-[#f2e7fc] text-[#a76ad5]' },
   { label: 'Upcoming exams', description: 'Examinations on the schedule', value: '5', icon: GraduationCap, tone: 'bg-[#fff0e6] text-[#eea06c]' },
 ];
@@ -35,6 +36,8 @@ const snapshots = [
 export default function DashboardPage() {
   const user = useAuthStore((state) => state.user);
   const feeOverview = useCurrentFeeSummary();
+  const libraryOverview = useLibraryStats();
+  const displaySnapshots = snapshots.map((item) => item.label === 'Library books issued' ? { ...item, value: libraryOverview.data ? String(libraryOverview.data.total_issued) : '—', description: libraryOverview.error ? 'Library totals unavailable' : libraryOverview.data ? item.description : 'Library staff access required' } : item);
   const displayStats = statCards.map((stat) => stat.title === 'Pending Fees' ? {
     ...stat, value: feeOverview.data ? `NPR ${Number(feeOverview.data.total_pending).toLocaleString('en-NP', { notation: 'compact', maximumFractionDigits: 1 })}` : '—',
     change: feeOverview.year ? `${feeOverview.year} BS · Live fees` : 'Fee report access required', up: undefined,
@@ -46,7 +49,7 @@ export default function DashboardPage() {
       <section className="rounded-2xl border border-border/50 bg-white p-5 sm:p-6">
         <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
           <div><h1>{title} Dashboard</h1><p className="mt-1.5 text-[13px] text-muted-foreground">Welcome back{user?.full_name ? `, ${user.full_name.split(' ')[0]}` : ''}. A fresh look at your school day.</p></div>
-          <span className="rounded-full border bg-muted/60 px-3 py-1.5 text-[10px] text-muted-foreground" title="Academic panels use sample figures. Fee totals use school records for staff with fee report access.">Academic demo · Live fees</span>
+          <span className="rounded-full border bg-muted/60 px-3 py-1.5 text-[10px] text-muted-foreground" title="Academic panels use sample figures. Fee and library totals use school records for authorized staff.">Academic demo · Live fees & library</span>
         </div>
         <div className="grid grid-cols-2 gap-3 xl:grid-cols-4 xl:gap-5">
           {displayStats.map((stat) => <div key={stat.title} className="stat-tile" data-tone={stat.tone}>
@@ -60,7 +63,7 @@ export default function DashboardPage() {
         <Card><CardHeader className="flex-row items-start justify-between gap-3"><div><CardTitle>Students by Grade</CardTitle><p className="mt-1 text-xs text-muted-foreground">Student enrollment across all grades</p></div><span className="mt-1 flex items-center gap-1.5 text-[10px] text-muted-foreground"><span className="size-2 rounded-full bg-primary" />Students</span></CardHeader><CardContent className="px-3 pb-4 sm:px-5"><StudentsByGradeChart data={studentsByGrade} /></CardContent></Card>
         <FeeOverviewCard state={feeOverview} />
         <Card><CardHeader className="flex-row items-start justify-between gap-3"><div><CardTitle>Attendance Overview</CardTitle><p className="mt-1 text-xs text-muted-foreground">Monthly student attendance · January–June</p></div><span className="rounded-lg bg-[#edf9f0] px-2.5 py-1 text-[10px] font-medium text-[#5a9c6b]">94.2% this month</span></CardHeader><CardContent className="px-3 pb-4 sm:px-5"><AttendanceTrendChart data={attendanceTrend} /></CardContent></Card>
-        <Card><CardHeader><CardTitle>School at a Glance</CardTitle><p className="text-xs text-muted-foreground">The numbers behind your school day</p></CardHeader><CardContent className="space-y-1">{snapshots.map((item) => <div key={item.label} className="flex items-center gap-3 border-b py-3.5 first:pt-0 last:border-0"><span className={`flex size-10 shrink-0 items-center justify-center rounded-xl ${item.tone}`}><item.icon className="size-5" strokeWidth={1.6} /></span><div className="min-w-0"><p className="text-xs font-medium">{item.label}</p><p className="mt-1 text-[10px] leading-4 text-muted-foreground">{item.description}</p></div><span className="ml-auto text-lg font-semibold tracking-tight">{item.value}</span></div>)}</CardContent></Card>
+        <Card><CardHeader><CardTitle>School at a Glance</CardTitle><p className="text-xs text-muted-foreground">The numbers behind your school day</p></CardHeader><CardContent className="space-y-1">{displaySnapshots.map((item) => <div key={item.label} className="flex items-center gap-3 border-b py-3.5 first:pt-0 last:border-0"><span className={`flex size-10 shrink-0 items-center justify-center rounded-xl ${item.tone}`}><item.icon className="size-5" strokeWidth={1.6} /></span><div className="min-w-0"><p className="text-xs font-medium">{item.label}</p><p className="mt-1 text-[10px] leading-4 text-muted-foreground">{item.description}</p></div><span className="ml-auto text-lg font-semibold tracking-tight">{item.value}</span></div>)}</CardContent></Card>
       </div>
       {quickLinks.length > 0 && <Card><CardHeader className="pb-4"><CardTitle>Make it a productive day</CardTitle><p className="text-xs text-muted-foreground">Your everyday essentials, a click away.</p></CardHeader><CardContent className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{quickLinks.map((item) => <Link key={item.href} href={item.href} className="group flex items-center gap-3 rounded-xl border p-3.5 text-xs transition-colors hover:border-primary/20 hover:bg-accent"><item.icon className="size-4 text-primary" />{item.label}<ArrowRight className="ml-auto size-3.5 text-muted-foreground group-hover:text-primary" /></Link>)}</CardContent></Card>}
     </div>

@@ -1,4 +1,5 @@
 import type { BillingResult, FeeAward, FeeHead, FeePayment, FeeReceipt, FeeRefund, FeeStatement, FeeStructure, FeeStudent, FeeSummary, OutstandingFees } from './fees';
+import type { LibraryBook, LibraryBorrower, LibraryCopy, LibraryEvent, LibraryLoan, LibraryPolicy, LibraryStats } from './library';
 
 export interface ApiResponse<T = unknown> {
   success: boolean;
@@ -35,6 +36,7 @@ type QueryValue = string | number | boolean | null | undefined;
 type QueryParams = Record<string, QueryValue | QueryValue[]>;
 
 interface RequestOptions {
+  responseType?: 'json' | 'blob';
   method?: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE';
   path: string;
   data?: unknown;
@@ -206,7 +208,7 @@ class ApiClient {
         }
       }
 
-      const payload = response.status === 204 ? null : await response.json();
+      const payload = response.status === 204 ? null : options.responseType === 'blob' && response.ok ? await response.blob() : await response.json();
       return normalizeResponse<T>(payload, response.ok);
     } catch (error) {
       return {
@@ -229,7 +231,7 @@ class ApiClient {
     const url = buildUrl(options.path, options.params);
     // Deduplicate within one login only; another user in the same school must
     // never receive a request that started under the previous user's token.
-    const key = `${localStorage.getItem('tenant_id') ?? ''}:${localStorage.getItem('access_token') ?? ''}:${url}`;
+    const key = `${localStorage.getItem('tenant_id') ?? ''}:${localStorage.getItem('access_token') ?? ''}:${options.responseType ?? 'json'}:${url}`;
     const existing = this.inFlightGets.get(key);
     if (existing) return existing as Promise<ApiResponse<T>>;
 
@@ -379,11 +381,26 @@ class ApiClient {
 
   library = {
     books: {
-      list: (params?: QueryParams) => this.request('library', { path: '/api/v1/library/books', params }),
-      create: (data: unknown) => this.request('library', { method: 'POST', path: '/api/v1/library/books', data }),
+      list: (params?: QueryParams) => this.request<{ books: LibraryBook[]; total: number; page: number; limit: number }>('library', { path: '/api/v1/library/books', params }),
+      get: (id: string) => this.request<LibraryBook>('library', { path: `/api/v1/library/books/${id}` }),
+      create: (data: unknown) => this.request<LibraryBook>('library', { method: 'POST', path: '/api/v1/library/books', data }),
+      update: (id: string, data: unknown) => this.request<LibraryBook>('library', { method: 'PATCH', path: `/api/v1/library/books/${id}`, data }),
     },
-    issue: (data: unknown) => this.request('library', { method: 'POST', path: '/api/v1/library/issue', data }),
-    return: (issueId: string) => this.request('library', { method: 'POST', path: `/api/v1/library/return/${issueId}` }),
+    copies: (id: string, params?: QueryParams) => this.request<{ copies: LibraryCopy[]; total: number; page: number; limit: number }>('library', { path: `/api/v1/library/books/${id}/copies`, params }),
+    addCopies: (id: string, data: unknown) => this.request<LibraryBook>('library', { method: 'POST', path: `/api/v1/library/books/${id}/copies`, data }),
+    updateCopy: (id: string, data: unknown) => this.request<LibraryCopy>('library', { method: 'PATCH', path: `/api/v1/library/copies/${id}`, data }),
+    borrowers: (params?: QueryParams) => this.request<{ borrowers: LibraryBorrower[]; total: number; page: number; limit: number }>('library', { path: '/api/v1/library/borrowers', params }),
+    issue: (data: unknown) => this.request<LibraryLoan>('library', { method: 'POST', path: '/api/v1/library/issue', data }),
+    return: (data: unknown) => this.request<LibraryLoan>('library', { method: 'POST', path: '/api/v1/library/return', data }),
+    loans: (params?: QueryParams) => this.request<{ issues: LibraryLoan[]; total: number; page: number; limit: number }>('library', { path: '/api/v1/library/issued', params }),
+    loan: (id: string) => this.request<LibraryLoan>('library', { path: `/api/v1/library/issued/${id}` }),
+    renew: (id: string, data: unknown) => this.request<LibraryLoan>('library', { method: 'POST', path: `/api/v1/library/issued/${id}/renew`, data }),
+    lost: (id: string, data: unknown) => this.request<LibraryLoan>('library', { method: 'POST', path: `/api/v1/library/issued/${id}/lost`, data }),
+    policy: () => this.request<LibraryPolicy>('library', { path: '/api/v1/library/policy' }),
+    updatePolicy: (data: unknown) => this.request<LibraryPolicy>('library', { method: 'PUT', path: '/api/v1/library/policy', data }),
+    stats: () => this.request<LibraryStats>('library', { path: '/api/v1/library/stats' }),
+    history: (params?: QueryParams) => this.request<{ events: LibraryEvent[]; total: number; page: number; limit: number }>('library', { path: '/api/v1/library/history', params }),
+    export: (params: QueryParams) => this.request<Blob>('library', { path: '/api/v1/library/export', params, responseType: 'blob' }),
   };
 
   transport = {
