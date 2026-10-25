@@ -128,6 +128,11 @@ class Attendance(Base, BaseModel, TimestampMixin, TenantMixin):
         ),
         # Composite indexes for common queries
         Index(
+            "ix_attendance_class_bs_month",
+            "school_id", "grade", "section", "date_bs",
+            postgresql_include=["date_ad", "status"],
+        ),
+        Index(
             "idx_attendance_school_date_grade_section",
             "school_id",
             "date_ad",

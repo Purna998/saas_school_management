@@ -168,7 +168,7 @@ class StudentService:
     async def delete_student(self, student_id: uuid.UUID, school_id: uuid.UUID):
         """Soft delete student"""
         student = await self.get_student(student_id, school_id)
-        student.deleted_at = datetime.utcnow()
+        student.soft_delete()
         student.status = StudentStatus.INACTIVE
 
         await self.db.commit()
@@ -217,12 +217,38 @@ class StudentService:
         # Paginate
         offset = (page - 1) * limit
         query = query.offset(offset).limit(limit)
-        query = query.order_by(Student.current_grade, Student.roll_number, Student.full_name_en)
+        query = query.order_by(Student.current_grade, Student.roll_number, Student.full_name_en, Student.id)
 
         result = await self.db.execute(query)
         students = result.scalars().all()
 
         return students, total
+
+    async def get_roster(
+        self,
+        school_id: uuid.UUID,
+        grade: int,
+        section: Optional[str] = None,
+    ) -> list[dict]:
+        """Read a complete active roster in one query without profile/guardian data."""
+        query = select(
+            Student.id,
+            Student.full_name_en,
+            Student.roll_number,
+            Student.admission_number,
+            Student.emis_student_id,
+        ).where(
+            Student.school_id == school_id,
+            Student.deleted_at.is_(None),
+            Student.status == StudentStatus.ACTIVE,
+            Student.current_grade == grade,
+        )
+        if section is not None:
+            query = query.where(Student.current_section == section)
+        result = await self.db.execute(
+            query.order_by(Student.roll_number, Student.full_name_en, Student.id)
+        )
+        return [dict(row) for row in result.mappings().all()]
 
     async def search_students(
         self,

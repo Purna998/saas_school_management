@@ -4,7 +4,7 @@ Student profile, enrollment, and guardian data
 """
 
 from datetime import datetime
-from sqlalchemy import Column, String, Boolean, DateTime, Date, Integer, Text, ForeignKey, Enum as SQLEnum
+from sqlalchemy import Column, String, Boolean, DateTime, Date, Integer, Text, ForeignKey, Index, text, Enum as SQLEnum
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 import enum
@@ -71,6 +71,21 @@ class Student(Base, BaseModel, TimestampMixin, TenantMixin, SoftDeleteMixin):
     """
 
     __tablename__ = "students"
+
+    __table_args__ = (
+        Index("idx_students_school_id", "school_id"),
+        Index(
+            "ix_students_live_directory",
+            "school_id", "current_grade", "roll_number", "full_name_en", "id",
+            postgresql_where=text("deleted_at IS NULL"),
+        ),
+        Index(
+            "ix_students_live_class_roster",
+            "school_id", "current_grade", "current_section", "status",
+            "roll_number", "full_name_en", "id",
+            postgresql_where=text("deleted_at IS NULL"),
+        ),
+    )
 
     # Identification
     emis_student_id = Column(

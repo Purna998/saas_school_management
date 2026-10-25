@@ -1,12 +1,13 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useCallback, useMemo, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { BarChart3, CalendarDays, Check, Clock3, History, Loader2, Save, UserCheck, UserX } from "lucide-react"
+import { BarChart3, CalendarDays, Check, Clock3, Loader2, Save, UserCheck, UserX } from "lucide-react"
 import { toast } from "sonner"
 
-import { AcademicGrade } from "@/components/academic/AcademicDialog"
-import { Student } from "@/components/students/StudentDialog"
+import type { AcademicGrade } from "@/components/academic/AcademicDialog"
+import { AttendanceRow, statusTone } from "@/components/attendance/AttendanceRow"
+import type { AttendanceStatus } from "@/components/attendance/AttendanceRow"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import {
@@ -18,8 +19,8 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { apiClient } from "@/lib/api/client"
+import type { StudentRoster, StudentRosterEntry } from "@/lib/api/client"
 
-type AttendanceStatus = "present" | "absent" | "late" | "leave" | "holiday"
 type AttendanceTab = "register" | "report"
 
 interface AttendanceRecord {
@@ -40,11 +41,6 @@ interface AttendanceList {
   period_number?: number | null
   total_students: number
   records: AttendanceRecord[]
-}
-
-interface StudentList {
-  students: Student[]
-  total: number
 }
 
 interface CalendarConversion {
@@ -86,14 +82,6 @@ interface StudentHistory {
 
 interface MarkValue { status: AttendanceStatus; remarks: string }
 
-const statusOptions: Array<{ value: AttendanceStatus; label: string }> = [
-  { value: "present", label: "Present" },
-  { value: "absent", label: "Absent" },
-  { value: "late", label: "Late" },
-  { value: "leave", label: "Leave" },
-  { value: "holiday", label: "Holiday" },
-]
-
 const bsMonths = ["Baisakh", "Jestha", "Ashadh", "Shrawan", "Bhadra", "Ashwin", "Kartik", "Mangsir", "Poush", "Magh", "Falgun", "Chaitra"]
 const selectClass = "h-10 rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
 
@@ -128,7 +116,7 @@ export default function AttendancePage() {
   const [changes, setChanges] = useState<Record<string, Record<string, MarkValue>>>({})
   const [reportYear, setReportYear] = useState("")
   const [reportMonth, setReportMonth] = useState("")
-  const [historyStudent, setHistoryStudent] = useState<Student | null>(null)
+  const [historyStudent, setHistoryStudent] = useState<StudentRosterEntry | null>(null)
   const [historyStart, setHistoryStart] = useState(dateBefore(30))
   const [historyEnd, setHistoryEnd] = useState(localDate())
   const queryClient = useQueryClient()
@@ -163,13 +151,13 @@ export default function AttendancePage() {
   const dateBs = formatBsDate(conversionQuery.data)
 
   const rosterQuery = useQuery({
-    queryKey: ["attendance", "roster", gradeNumber, effectiveSection],
+    queryKey: ["students", "roster", gradeNumber, effectiveSection],
     queryFn: async () => {
-      const response = await apiClient.students.list({ page: 1, limit: 100, grade: gradeNumber, section: effectiveSection, status: "active" })
+      const response = await apiClient.students.roster(gradeNumber!, effectiveSection)
       if (!response.success) throw new Error(response.error?.message ?? "Unable to load the class roster")
-      return response.data as StudentList
+      return response.data as StudentRoster
     },
-    enabled: Boolean(gradeNumber && effectiveSection),
+    enabled: tab === "register" && Boolean(gradeNumber && effectiveSection),
   })
 
   const attendanceQuery = useQuery({
@@ -201,15 +189,18 @@ export default function AttendancePage() {
     return result
   }, { present: 0, absent: 0, late: 0, leave: 0, holiday: 0 })
 
-  const updateMark = (studentId: string, patch: Partial<MarkValue>) => {
-    setChanges((current) => ({
-      ...current,
-      [selectionKey]: {
-        ...(current[selectionKey] ?? {}),
-        [studentId]: { ...valueFor(studentId), ...patch },
-      },
-    }))
-  }
+  const updateMark = useCallback((studentId: string, patch: Partial<MarkValue>) => {
+    setChanges((current) => {
+      const saved = existingByStudent.get(studentId)
+      const previous = current[selectionKey]?.[studentId] ?? {
+        status: saved?.status ?? "present", remarks: saved?.remarks ?? "",
+      }
+      return {
+        ...current,
+        [selectionKey]: { ...current[selectionKey], [studentId]: { ...previous, ...patch } },
+      }
+    })
+  }, [selectionKey, existingByStudent])
 
   const markAll = (status: AttendanceStatus) => {
     setChanges((current) => ({
@@ -333,13 +324,7 @@ export default function AttendancePage() {
                   <thead><tr className="border-b"><Th>Roll</Th><Th>Student</Th><Th>Status</Th><Th>Remarks</Th><Th align="right">History</Th></tr></thead>
                   <tbody>{students.map((student) => {
                     const mark = valueFor(student.id)
-                    return <tr key={student.id} className="border-b last:border-0 hover:bg-accent/40">
-                      <Td>{student.roll_number ?? "—"}</Td>
-                      <Td><p className="font-medium">{student.full_name_en}</p><p className="text-xs text-muted-foreground">{student.admission_number || student.emis_student_id || "No student ID"}</p></Td>
-                      <Td><select aria-label={`Attendance status for ${student.full_name_en}`} className={`${selectClass} min-w-32 capitalize ${statusTone(mark.status)}`} value={mark.status} onChange={(event) => updateMark(student.id, { status: event.target.value as AttendanceStatus })}>{statusOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></Td>
-                      <Td><Input aria-label={`Remarks for ${student.full_name_en}`} maxLength={500} placeholder="Optional note" value={mark.remarks} onChange={(event) => updateMark(student.id, { remarks: event.target.value })} /></Td>
-                      <Td align="right"><Button size="icon" variant="ghost" aria-label={`View attendance history for ${student.full_name_en}`} onClick={() => setHistoryStudent(student)}><History /></Button></Td>
-                    </tr>
+                    return <AttendanceRow key={student.id} student={student} status={mark.status} remarks={mark.remarks} onChange={updateMark} onHistory={setHistoryStudent} />
                   })}</tbody>
                 </table>
               </div>
@@ -376,10 +361,6 @@ export default function AttendancePage() {
       </Dialog>
     </div>
   )
-}
-
-function statusTone(status: AttendanceStatus) {
-  return status === "present" ? "text-emerald-700" : status === "absent" ? "text-red-700" : status === "late" ? "text-amber-700" : status === "leave" ? "text-blue-700" : "text-slate-600"
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) { return <label className="space-y-1.5"><span className="text-sm font-medium">{label}</span>{children}</label> }

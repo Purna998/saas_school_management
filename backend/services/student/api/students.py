@@ -28,6 +28,7 @@ from services.student.schemas.student import (
     StudentUpdate,
     StudentResponse,
     StudentListResponse,
+    StudentRosterResponse,
     GuardianResponse,
     BulkImportResponse,
 )
@@ -238,6 +239,18 @@ async def list_students(
         page=page,
         limit=limit,
     )
+
+
+@router.get("/roster", response_model=StudentRosterResponse)
+async def get_class_roster(
+    grade: int = Query(..., ge=1, le=12),
+    section: Optional[str] = Query(default=None, max_length=10),
+    current_user: User = Depends(require_permission("student:read")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Complete class/grade roster, including classes larger than a directory page."""
+    students = await StudentService(db).get_roster(current_user.school_id, grade, section)
+    return StudentRosterResponse(students=students, total=len(students))
 
 
 @router.get("/search")

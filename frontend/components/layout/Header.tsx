@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import Link from 'next/link';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
@@ -17,6 +18,7 @@ import { getNavigation, roleLabel } from './navigation';
 export function Header() {
   const { user, clearAuth } = useAuthStore();
   const router = useRouter();
+  const queryClient = useQueryClient();
   const [searchOpen, setSearchOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -39,7 +41,7 @@ export function Header() {
     setLoggingOut(true);
     try { await apiClient.auth.logout(); }
     catch (error) { console.error('Logout error:', error); }
-    finally { clearAuth(); router.push('/auth/login'); }
+    finally { queryClient.clear(); clearAuth(); router.push('/auth/login'); }
   };
 
   return (

@@ -267,8 +267,12 @@ class AttendanceService:
         Returns:
             MonthlyReportResponse with daily summaries
         """
-        # Build BS date prefix for the month (e.g., "2081-03")
-        month_prefix = f"{year_bs}-{month_bs:02d}"
+        # A half-open range works with the ordinary B-tree index regardless of
+        # database collation, unlike a LIKE prefix on a text date.
+        month_start = f"{year_bs:04d}-{month_bs:02d}-01"
+        next_year = year_bs + (month_bs == 12)
+        next_month = 1 if month_bs == 12 else month_bs + 1
+        month_end = f"{next_year:04d}-{next_month:02d}-01"
 
         # Aggregate in PostgreSQL so the API does not load one ORM object per
         # student/day just to count statuses.
@@ -277,14 +281,15 @@ class AttendanceService:
                 Attendance.date_ad,
                 Attendance.date_bs,
                 Attendance.status,
-                func.count(Attendance.id).label("status_count"),
+                func.count().label("status_count"),
             )
             .where(
                 and_(
                     Attendance.school_id == school_id,
                     Attendance.grade == grade,
                     Attendance.section == section,
-                    Attendance.date_bs.like(f"{month_prefix}%"),
+                    Attendance.date_bs >= month_start,
+                    Attendance.date_bs < month_end,
                 )
             )
             .group_by(Attendance.date_ad, Attendance.date_bs, Attendance.status)

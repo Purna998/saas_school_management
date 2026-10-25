@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -21,6 +22,7 @@ type LoginForm = z.infer<typeof loginSchema>;
 
 export default function LoginPage() {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const { setAuth } = useAuthStore();
   const [isLoading, setIsLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
@@ -34,6 +36,8 @@ export default function LoginPage() {
       const response = await apiClient.auth.login(data.email, data.password);
       if (response.success) {
         const { user, tokens } = response.data;
+        // School/user query keys can be reused only inside the same session.
+        queryClient.clear();
         setAuth({
           id: user.id, email: user.email, full_name: user.full_name_en,
           role: user.roles.includes('super_admin') ? 'super_admin' : user.roles[0] ?? '',

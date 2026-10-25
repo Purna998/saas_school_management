@@ -7,7 +7,7 @@ A modular FastAPI monolith and a Next.js frontend for a multi-tenant school mana
 ### Prerequisites
 
 - Python 3.13
-- Node.js 20 or newer
+- Node.js 22.13 or a newer supported LTS release
 - PostgreSQL 16 running on `localhost:5432`
 - Redis 7 running on `localhost:6379`
 
@@ -88,8 +88,12 @@ uvicorn main:app --host 127.0.0.1 --port 8000 --workers 2
 
 ```bash
 backend/.venv/Scripts/python -m pytest backend/tests -q
+npm --prefix frontend test
 npm --prefix frontend run lint
 npm --prefix frontend run build
 ```
 
 On macOS/Linux, use `backend/.venv/bin/python` for the test command.
+
+Performance changes, benchmark results, deployment steps and the Nepal academic
+workflow review are documented in [docs/performance-review.md](docs/performance-review.md).

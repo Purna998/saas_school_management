@@ -68,8 +68,10 @@ def calculate_grade_point(marks_obtained: Decimal, full_marks: Decimal) -> Decim
 
     percentage = (marks_obtained / full_marks) * 100
 
-    for low, high, gp in GPA_TABLE:
-        if low <= percentage <= high:
+    # Thresholds are descending. Inclusive integer upper bounds left decimal
+    # scores such as 89.5% between bands and incorrectly returned zero.
+    for low, _high, gp in GPA_TABLE:
+        if low <= percentage <= 100:
             return gp
 
     return Decimal("0.0")
@@ -695,11 +697,10 @@ class ExamService:
             else:
                 result.rank = None
 
+        # INSERT ... RETURNING loads generated timestamps for the whole batch.
+        # Sessions retain attributes on commit, so refreshing each result adds
+        # one unnecessary SELECT per student to every calculation.
         await self.db.commit()
-
-        # Refresh results
-        for result in results:
-            await self.db.refresh(result)
 
         logger.info(
             f"Results calculated for exam {exam.name}: "

@@ -16,6 +16,19 @@ export interface ApiResponse<T = unknown> {
   } | null;
 }
 
+export interface StudentRosterEntry {
+  id: string;
+  full_name_en: string;
+  roll_number: number | null;
+  admission_number: string | null;
+  emis_student_id: string | null;
+}
+
+export interface StudentRoster {
+  students: StudentRosterEntry[];
+  total: number;
+}
+
 type QueryValue = string | number | boolean | null | undefined;
 type QueryParams = Record<string, QueryValue | QueryValue[]>;
 
@@ -177,7 +190,11 @@ class ApiClient {
           return this.performRequest<T>(_module, { ...options, retryingAfterRefresh: true });
         } catch (error) {
           this.clearSession();
-          if (window.location.pathname !== '/auth/login') window.location.assign('/auth/login');
+          // A full same-origin navigation discards the expired session's
+          // in-memory queries and pending UI state, including on refresh failure.
+          if (window.location.pathname !== '/auth/login') {
+            window.location.assign(new URL('/auth/login', window.location.origin).href);
+          }
           throw error;
         }
       }
@@ -203,7 +220,9 @@ class ApiClient {
     if (method !== 'GET') return this.performRequest<T>(module, options);
 
     const url = buildUrl(options.path, options.params);
-    const key = `${localStorage.getItem('tenant_id') ?? ''}:${url}`;
+    // Deduplicate within one login only; another user in the same school must
+    // never receive a request that started under the previous user's token.
+    const key = `${localStorage.getItem('tenant_id') ?? ''}:${localStorage.getItem('access_token') ?? ''}:${url}`;
     const existing = this.inFlightGets.get(key);
     if (existing) return existing as Promise<ApiResponse<T>>;
 
@@ -225,6 +244,9 @@ class ApiClient {
   };
 
   students = {
+    roster: (grade: number, section?: string) => this.request<StudentRoster>('student', {
+      path: '/api/v1/students/roster', params: { grade, section },
+    }),
     list: (params?: QueryParams) => this.request('student', { path: '/api/v1/students', params }),
     get: (id: string) => this.request('student', { path: `/api/v1/students/${id}` }),
     create: (data: unknown) => this.request('student', { method: 'POST', path: '/api/v1/students', data }),

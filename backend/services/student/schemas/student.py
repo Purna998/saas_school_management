@@ -168,6 +168,21 @@ class StudentResponse(BaseModel):
         from_attributes = True
 
 
+class StudentRosterEntry(BaseModel):
+    """Only the fields needed by attendance and marks entry sheets."""
+
+    id: UUID
+    full_name_en: str
+    roll_number: Optional[int] = None
+    admission_number: Optional[str] = None
+    emis_student_id: Optional[str] = None
+
+
+class StudentRosterResponse(BaseModel):
+    students: List[StudentRosterEntry]
+    total: int
+
+
 class StudentListResponse(BaseModel):
     """Student list with pagination"""
 

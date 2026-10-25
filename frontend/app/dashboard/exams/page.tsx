@@ -1,26 +1,25 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useCallback, useMemo, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Award, Calculator, CheckCircle2, Edit, Eye, FilePlus2, Loader2, Play, Save, Send, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 
-import { AcademicGrade, AcademicSubject } from "@/components/academic/AcademicDialog"
+import type { AcademicGrade, AcademicSubject } from "@/components/academic/AcademicDialog"
 import { Exam, ExamDialog, ExamSubject } from "@/components/exams/ExamDialog"
-import { Student } from "@/components/students/StudentDialog"
+import { MarkEntryRow } from "@/components/exams/MarkEntryRow"
+import type { MarkValue } from "@/components/exams/MarkEntryRow"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { Input } from "@/components/ui/input"
 import { apiClient } from "@/lib/api/client"
+import type { StudentRoster } from "@/lib/api/client"
 
 type Tab = "exams" | "marks" | "results"
 
 interface ExamList { exams: Exam[]; total: number; page: number; limit: number }
-interface StudentList { students: Student[]; total: number }
 interface Mark { id: string; student_id: string; marks_obtained: number; is_absent: boolean; grade_point?: number | null; remarks?: string | null }
 interface MarkList { exam_subject_id: string; subject_id: string; full_marks: number; pass_marks: number; marks: Mark[]; total: number }
-interface MarkValue { marks: string; absent: boolean; remarks: string }
 interface Result { id: string; student_id: string; total_marks?: number | null; percentage?: number | null; gpa?: number | null; division?: string | null; rank?: number | null; status: string }
 interface ResultList { exam_id: string; exam_name: string; grade: number; results: Result[]; total: number }
 interface ReportSubject { subject_id: string; subject_name?: string | null; full_marks: number; pass_marks: number; marks_obtained: number; is_absent: boolean; grade_point?: number | null; remarks?: string | null }
@@ -85,21 +84,21 @@ export default function ExamsPage() {
   const subjectName = (subject: ExamSubject) => academicSubjects.find((item) => item.id === subject.subject_id)?.name_en ?? "Subject"
 
   const rosterQuery = useQuery({
-    queryKey: ["exams", "roster", selectedExam?.grade, effectiveSection],
+    queryKey: ["students", "roster", selectedExam?.grade, effectiveSection],
     queryFn: async () => {
-      const response = await apiClient.students.list({ page: 1, limit: 100, grade: selectedExam!.grade, section: effectiveSection, status: "active" })
+      const response = await apiClient.students.roster(selectedExam!.grade, effectiveSection)
       if (!response.success) throw new Error(response.error?.message ?? "Unable to load students")
-      return response.data as StudentList
+      return response.data as StudentRoster
     },
     enabled: tab === "marks" && Boolean(selectedExam && effectiveSection),
   })
 
   const allStudentsQuery = useQuery({
-    queryKey: ["exams", "grade-students", selectedExam?.grade],
+    queryKey: ["students", "roster", selectedExam?.grade],
     queryFn: async () => {
-      const response = await apiClient.students.list({ page: 1, limit: 100, grade: selectedExam!.grade, status: "active" })
+      const response = await apiClient.students.roster(selectedExam!.grade)
       if (!response.success) throw new Error(response.error?.message ?? "Unable to load student names")
-      return response.data as StudentList
+      return response.data as StudentRoster
     },
     enabled: tab === "results" && Boolean(selectedExam),
   })
@@ -153,7 +152,15 @@ export default function ExamsPage() {
     const existing = existingMarks.get(studentId)
     return { marks: existing ? String(existing.marks_obtained) : "", absent: existing?.is_absent ?? false, remarks: existing?.remarks ?? "" }
   })()
-  const updateMark = (studentId: string, patch: Partial<MarkValue>) => setMarkChanges((current) => ({ ...current, [markKey]: { ...(current[markKey] ?? {}), [studentId]: { ...markFor(studentId), ...patch } } }))
+  const updateMark = useCallback((studentId: string, patch: Partial<MarkValue>) => {
+    setMarkChanges((current) => {
+      const saved = existingMarks.get(studentId)
+      const previous = current[markKey]?.[studentId] ?? {
+        marks: saved ? String(saved.marks_obtained) : "", absent: saved?.is_absent ?? false, remarks: saved?.remarks ?? "",
+      }
+      return { ...current, [markKey]: { ...current[markKey], [studentId]: { ...previous, ...patch } } }
+    })
+  }, [markKey, existingMarks])
 
   const saveMarks = useMutation({
     mutationFn: async () => {
@@ -203,7 +210,7 @@ export default function ExamsPage() {
     </CardContent></Card>
 
     {examsQuery.isLoading || gradesQuery.isLoading ? <Card><Empty loading text="Loading exams..." /></Card> : examsQuery.error || gradesQuery.error ? <Card><Empty error={(examsQuery.error || gradesQuery.error)!.message} /></Card> : tab === "exams" ? <Card><CardHeader><CardTitle>Exam schedule</CardTitle></CardHeader><CardContent>{exams.length === 0 ? <Empty text="No exams match the selected filters." /> : <div className="overflow-x-auto"><table className="w-full min-w-[900px]"><thead><tr className="border-b"><Th>Exam</Th><Th>Grade</Th><Th>Academic year</Th><Th>Schedule</Th><Th>Subjects</Th><Th>Status</Th><Th align="right">Actions</Th></tr></thead><tbody>{exams.map((exam) => <tr key={exam.id} className="border-b last:border-0 hover:bg-accent/40"><Td><p className="font-medium">{exam.name}</p><p className="text-xs text-muted-foreground">{humanize(exam.exam_type)}</p></Td><Td>Grade {exam.grade}</Td><Td>{exam.academic_year_bs} BS</Td><Td>{exam.start_date_ad || "Not set"}{exam.end_date_ad ? ` – ${exam.end_date_ad}` : ""}</Td><Td>{exam.subjects.length}</Td><Td><Status value={exam.status} /></Td><Td align="right"><div className="flex justify-end gap-1">{exam.status === "draft" && <><Button size="icon" variant="ghost" aria-label={`Edit ${exam.name}`} onClick={() => setEditor({ exam })}><Edit /></Button><Button size="icon" variant="ghost" aria-label={`Delete ${exam.name}`} onClick={() => window.confirm(`Delete draft exam “${exam.name}”?`) && deleteExam.mutate(exam)}><Trash2 className="text-destructive" /></Button></>}{statusOrder[exam.status] && <Button size="sm" variant="outline" disabled={busy} onClick={() => changeStatus.mutate({ exam, status: statusOrder[exam.status]! })}>{exam.status === "scheduled" ? <Play /> : <CheckCircle2 />}{statusAction[exam.status]}</Button>}{exam.status === "completed" && <Button size="sm" variant="outline" onClick={() => { setSelectedExamId(exam.id); setTab("results") }}><Award />Results</Button>}{exam.status === "published" && <Button size="sm" variant="outline" onClick={() => { setSelectedExamId(exam.id); setTab("results") }}><Eye />View</Button>}</div></Td></tr>)}</tbody></table></div>}</CardContent></Card>
-    : tab === "marks" ? <Card><CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><CardTitle>Marks entry</CardTitle><p className="mt-1 text-sm text-muted-foreground">{selectedExamSubject ? `${subjectName(selectedExamSubject)} · ${selectedExamSubject.full_marks} full marks · ${selectedExamSubject.pass_marks} pass marks` : "Select an exam and subject."}</p></div><Button disabled={!rosterQuery.data?.students.length || selectedExam?.is_locked || saveMarks.isPending} onClick={() => saveMarks.mutate()}>{saveMarks.isPending ? <Loader2 className="animate-spin" /> : <Save />}Save marks</Button></CardHeader><CardContent>{!selectedExam ? <Empty text="Select an exam to enter marks." /> : selectedExam.is_locked ? <Empty text="This exam is published and its marks are locked." /> : !effectiveSection ? <Empty text="Configure a section for this grade in Academic Structure." /> : rosterQuery.isLoading || marksQuery.isLoading ? <Empty loading text="Loading mark sheet..." /> : rosterQuery.error || marksQuery.error ? <Empty error={(rosterQuery.error || marksQuery.error)!.message} /> : !rosterQuery.data?.students.length ? <Empty text="No active students are assigned to this section." /> : <div className="overflow-x-auto"><table className="w-full min-w-[780px]"><thead><tr className="border-b"><Th>Roll</Th><Th>Student</Th><Th>Marks</Th><Th>Absent</Th><Th>Remarks</Th></tr></thead><tbody>{rosterQuery.data.students.map((student) => { const value = markFor(student.id); return <tr key={student.id} className="border-b last:border-0"><Td>{student.roll_number ?? "—"}</Td><Td strong>{student.full_name_en}</Td><Td><Input className="w-28" aria-label={`Marks for ${student.full_name_en}`} type="number" min={0} max={selectedExamSubject?.full_marks} step="0.01" disabled={value.absent} value={value.absent ? "" : value.marks} onChange={(event) => updateMark(student.id, { marks: event.target.value })} /></Td><Td><label className="inline-flex items-center gap-2 text-sm"><input type="checkbox" checked={value.absent} onChange={(event) => updateMark(student.id, { absent: event.target.checked })} />Absent</label></Td><Td><Input maxLength={500} placeholder="Optional remark" value={value.remarks} onChange={(event) => updateMark(student.id, { remarks: event.target.value })} /></Td></tr> })}</tbody></table></div>}</CardContent></Card>
+    : tab === "marks" ? <Card><CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><CardTitle>Marks entry</CardTitle><p className="mt-1 text-sm text-muted-foreground">{selectedExamSubject ? `${subjectName(selectedExamSubject)} · ${selectedExamSubject.full_marks} full marks · ${selectedExamSubject.pass_marks} pass marks` : "Select an exam and subject."}</p></div><Button disabled={!rosterQuery.data?.students.length || selectedExam?.is_locked || saveMarks.isPending} onClick={() => saveMarks.mutate()}>{saveMarks.isPending ? <Loader2 className="animate-spin" /> : <Save />}Save marks</Button></CardHeader><CardContent>{!selectedExam ? <Empty text="Select an exam to enter marks." /> : selectedExam.is_locked ? <Empty text="This exam is published and its marks are locked." /> : !effectiveSection ? <Empty text="Configure a section for this grade in Academic Structure." /> : rosterQuery.isLoading || marksQuery.isLoading ? <Empty loading text="Loading mark sheet..." /> : rosterQuery.error || marksQuery.error ? <Empty error={(rosterQuery.error || marksQuery.error)!.message} /> : !rosterQuery.data?.students.length ? <Empty text="No active students are assigned to this section." /> : <div className="overflow-x-auto"><table className="w-full min-w-[780px]"><thead><tr className="border-b"><Th>Roll</Th><Th>Student</Th><Th>Marks</Th><Th>Absent</Th><Th>Remarks</Th></tr></thead><tbody>{rosterQuery.data.students.map((student) => { const value = markFor(student.id); return <MarkEntryRow key={student.id} student={student} marks={value.marks} absent={value.absent} remarks={value.remarks} fullMarks={selectedExamSubject?.full_marks} onChange={updateMark} /> })}</tbody></table></div>}</CardContent></Card>
     : <div className="space-y-4"><div className="pastel-summary grid grid-cols-2 gap-4 sm:grid-cols-4"><Summary label="Students" value={resultsQuery.data?.total ?? 0} /><Summary label="Passed" value={resultSummary.pass ?? 0} tone="text-emerald-600" /><Summary label="Failed" value={resultSummary.fail ?? 0} tone="text-red-600" /><Summary label="Absent" value={resultSummary.absent ?? 0} tone="text-amber-600" /></div><Card><CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><CardTitle>Calculated results</CardTitle><p className="mt-1 text-sm text-muted-foreground">Grades 1–10 use GPA; Grades 11–12 use percentage and division.</p></div><div className="flex flex-wrap gap-2">{selectedExam && selectedExam.status !== "published" && <Button variant="outline" disabled={calculateResults.isPending} onClick={() => calculateResults.mutate(selectedExam)}>{calculateResults.isPending ? <Loader2 className="animate-spin" /> : <Calculator />}Calculate</Button>}{selectedExam?.status === "completed" && <Button disabled={!resultsQuery.data?.total || publishResults.isPending} onClick={() => window.confirm("Publish these results? Marks will be locked permanently.") && publishResults.mutate(selectedExam)}>{publishResults.isPending ? <Loader2 className="animate-spin" /> : <Send />}Publish results</Button>}</div></CardHeader><CardContent>{!selectedExam ? <Empty text="Select an exam to view results." /> : resultsQuery.isLoading || allStudentsQuery.isLoading ? <Empty loading text="Loading results..." /> : resultsQuery.error || allStudentsQuery.error ? <Empty error={(resultsQuery.error || allStudentsQuery.error)!.message} /> : !resultsQuery.data?.results.length ? <Empty text="No calculated results yet. Enter every subject’s marks, then calculate results." /> : <div className="overflow-x-auto"><table className="w-full min-w-[760px]"><thead><tr className="border-b"><Th>Rank</Th><Th>Student</Th><Th>Total</Th><Th>{selectedExam.grade >= 11 ? "Percentage" : "GPA"}</Th><Th>Division</Th><Th>Status</Th><Th align="right">Report card</Th></tr></thead><tbody>{resultsQuery.data.results.map((result) => <tr key={result.id} className="border-b last:border-0"><Td>{result.rank ?? "—"}</Td><Td strong>{studentNames.get(result.student_id) ?? result.student_id.slice(0, 8)}</Td><Td>{result.total_marks ?? "—"}</Td><Td>{selectedExam.grade >= 11 ? result.percentage != null ? `${result.percentage}%` : "—" : result.gpa ?? "—"}</Td><Td>{result.division ? humanize(result.division) : "—"}</Td><Td><Status value={result.status} /></Td><Td align="right"><Button size="sm" variant="outline" onClick={() => setReportStudentId(result.student_id)}><Eye />View</Button></Td></tr>)}</tbody></table></div>}</CardContent></Card></div>}
 
     {editor && <ExamDialog key={editor.exam?.id ?? "new"} exam={editor.exam} grades={grades} saving={saveExam.isPending} onClose={() => setEditor(null)} onSave={async (payload) => { await saveExam.mutateAsync({ exam: editor.exam, payload }) }} />}
