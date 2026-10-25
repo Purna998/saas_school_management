@@ -175,5 +175,5 @@ class UploadPhotoResponse(BaseModel):
 
     class Config:
         json_schema_extra = {
-            "example": {"photo_url": "https://cdn.example.com/photos/user123.jpg"}
+                "example": {"photo_url": "https://api.example.com/api/v1/users/me/photo/abc123.jpg"}
         }

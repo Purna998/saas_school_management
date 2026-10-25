@@ -22,6 +22,20 @@ from services.attendance.services.attendance_service import AttendanceService
 router = APIRouter()
 
 
+def _school_id(current_user) -> UUID:
+    """Return the authenticated tenant without relying on private token state."""
+    school_id = current_user.school_id
+    if not school_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=error_response(
+                message="School context not found for this user",
+                code="MISSING_SCHOOL_CONTEXT",
+            ),
+        )
+    return UUID(school_id) if isinstance(school_id, str) else school_id
+
+
 @router.post(
     "/mark",
     summary="Batch mark attendance",
@@ -45,19 +59,8 @@ async def mark_attendance(
     """
     service = AttendanceService(db)
 
-    # Use school_id from the authenticated user's token
-    school_id = current_user._token_info.get("school_id")
-    if not school_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=error_response(
-                message="School context not found in token",
-                code="MISSING_SCHOOL_CONTEXT",
-            ),
-        )
-
     result = await service.mark_attendance(
-        school_id=UUID(school_id) if isinstance(school_id, str) else school_id,
+        school_id=_school_id(current_user),
         data=data,
         marked_by=current_user.id,
     )
@@ -91,18 +94,8 @@ async def get_attendance_by_date(
     """
     service = AttendanceService(db)
 
-    school_id = current_user._token_info.get("school_id")
-    if not school_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=error_response(
-                message="School context not found in token",
-                code="MISSING_SCHOOL_CONTEXT",
-            ),
-        )
-
     result = await service.get_attendance_by_date(
-        school_id=UUID(school_id) if isinstance(school_id, str) else school_id,
+        school_id=_school_id(current_user),
         date_ad=date_ad,
         grade=grade,
         section=section,
@@ -134,16 +127,6 @@ async def get_student_attendance(
     """
     service = AttendanceService(db)
 
-    school_id = current_user._token_info.get("school_id")
-    if not school_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=error_response(
-                message="School context not found in token",
-                code="MISSING_SCHOOL_CONTEXT",
-            ),
-        )
-
     # Validate date range
     if start_date > end_date:
         raise HTTPException(
@@ -158,7 +141,7 @@ async def get_student_attendance(
         student_id=student_id,
         start_date=start_date,
         end_date=end_date,
-        school_id=UUID(school_id) if isinstance(school_id, str) else school_id,
+        school_id=_school_id(current_user),
     )
 
     return success_response(data=result.model_dump(mode="json"))
@@ -188,18 +171,8 @@ async def get_monthly_summary(
     """
     service = AttendanceService(db)
 
-    school_id = current_user._token_info.get("school_id")
-    if not school_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=error_response(
-                message="School context not found in token",
-                code="MISSING_SCHOOL_CONTEXT",
-            ),
-        )
-
     result = await service.get_monthly_summary(
-        school_id=UUID(school_id) if isinstance(school_id, str) else school_id,
+        school_id=_school_id(current_user),
         grade=grade,
         section=section,
         year_bs=year_bs,
@@ -230,19 +203,9 @@ async def update_attendance(
     """
     service = AttendanceService(db)
 
-    school_id = current_user._token_info.get("school_id")
-    if not school_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=error_response(
-                message="School context not found in token",
-                code="MISSING_SCHOOL_CONTEXT",
-            ),
-        )
-
     result = await service.update_attendance(
         attendance_id=attendance_id,
-        school_id=UUID(school_id) if isinstance(school_id, str) else school_id,
+        school_id=_school_id(current_user),
         data=data,
         updated_by=current_user.id,
     )

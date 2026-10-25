@@ -3,9 +3,8 @@ Nepal School Management System - Staff Models
 Staff profile, leave management, and attendance tracking
 """
 
-from datetime import datetime, date, time
 from sqlalchemy import (
-    Column, String, Boolean, DateTime, Date, Integer, Text,
+    Column, String, Date, Integer, Text,
     ForeignKey, Numeric, Time, Enum as SQLEnum
 )
 from sqlalchemy.dialects.postgresql import UUID

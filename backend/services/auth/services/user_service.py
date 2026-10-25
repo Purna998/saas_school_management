@@ -219,7 +219,7 @@ class UserService:
 
         Args:
             user_id: User UUID
-            photo_url: Photo URL (S3/CloudFront)
+            photo_url: Authenticated profile photo API URL
 
         Returns:
             Updated user object

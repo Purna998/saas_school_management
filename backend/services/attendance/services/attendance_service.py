@@ -74,14 +74,25 @@ class AttendanceService:
             # Send the whole class in one PostgreSQL round trip rather than one
             # INSERT per student.
             stmt = pg_insert(Attendance).values(values)
-            stmt = stmt.on_conflict_do_update(
-                constraint="uq_attendance_student_date_period",
-                set_={
-                    "status": stmt.excluded.status,
-                    "marked_by": stmt.excluded.marked_by,
-                    "remarks": stmt.excluded.remarks,
-                },
-            )
+            update_values = {
+                "status": stmt.excluded.status,
+                "marked_by": stmt.excluded.marked_by,
+                "remarks": stmt.excluded.remarks,
+                "grade": stmt.excluded.grade,
+                "section": stmt.excluded.section,
+                "date_bs": stmt.excluded.date_bs,
+            }
+            if data.period_number is None:
+                stmt = stmt.on_conflict_do_update(
+                    index_elements=["school_id", "student_id", "date_ad"],
+                    index_where=Attendance.period_number.is_(None),
+                    set_=update_values,
+                )
+            else:
+                stmt = stmt.on_conflict_do_update(
+                    constraint="uq_attendance_student_date_period",
+                    set_=update_values,
+                )
             await self.db.execute(stmt)
 
         # Flush to ensure all records are written
@@ -449,5 +460,9 @@ class AttendanceService:
         record.marked_by = updated_by
 
         await self.db.flush()
+        # PostgreSQL refreshes server-managed timestamps during UPDATE. Load
+        # them while still inside the async session so Pydantic serialization
+        # never triggers implicit synchronous I/O (MissingGreenlet).
+        await self.db.refresh(record)
 
         return AttendanceResponse.model_validate(record)

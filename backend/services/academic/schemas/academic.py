@@ -5,7 +5,6 @@ Pydantic models for academic management endpoints
 
 from typing import Optional, List
 from uuid import UUID
-from datetime import datetime, time
 from pydantic import BaseModel, Field
 
 
@@ -14,6 +13,14 @@ class GradeCreate(BaseModel):
     name_en: str = Field(..., min_length=1)
     name_np: Optional[str] = None
     academic_year_bs: Optional[str] = None
+
+
+class GradeUpdate(BaseModel):
+    grade_number: Optional[int] = Field(None, ge=1, le=12)
+    name_en: Optional[str] = Field(None, min_length=1)
+    name_np: Optional[str] = None
+    academic_year_bs: Optional[str] = None
+    is_active: Optional[bool] = None
 
 
 class GradeResponse(BaseModel):
@@ -35,6 +42,15 @@ class SectionCreate(BaseModel):
     name: str = Field(..., max_length=10)
     capacity: int = Field(default=40, ge=1, le=100)
     class_teacher_id: Optional[UUID] = None
+    stream_id: Optional[UUID] = None
+
+
+class SectionUpdate(BaseModel):
+    name: Optional[str] = Field(None, min_length=1, max_length=10)
+    capacity: Optional[int] = Field(None, ge=1, le=100)
+    class_teacher_id: Optional[UUID] = None
+    stream_id: Optional[UUID] = None
+    is_active: Optional[bool] = None
 
 
 class SectionResponse(BaseModel):
@@ -43,6 +59,7 @@ class SectionResponse(BaseModel):
     name: str
     capacity: int
     class_teacher_id: Optional[UUID] = None
+    stream_id: Optional[UUID] = None
     is_active: bool
 
     class Config:
@@ -58,8 +75,25 @@ class SubjectCreate(BaseModel):
     full_marks: int = Field(default=100, ge=1)
     pass_marks: int = Field(default=40, ge=1)
     credit_hours: int = Field(default=4, ge=1)
+    optional_group: Optional[str] = Field(None, max_length=30)
     teacher_id: Optional[UUID] = None
     faculty_id: Optional[UUID] = None
+    stream_ids: List[UUID] = Field(default_factory=list)
+
+
+class SubjectUpdate(BaseModel):
+    code: Optional[str] = Field(None, min_length=1, max_length=20)
+    name_en: Optional[str] = Field(None, min_length=1)
+    name_np: Optional[str] = None
+    subject_type: Optional[str] = None
+    full_marks: Optional[int] = Field(None, ge=1)
+    pass_marks: Optional[int] = Field(None, ge=0)
+    credit_hours: Optional[int] = Field(None, ge=1)
+    optional_group: Optional[str] = Field(None, max_length=30)
+    teacher_id: Optional[UUID] = None
+    faculty_id: Optional[UUID] = None
+    stream_ids: Optional[List[UUID]] = None
+    is_active: Optional[bool] = None
 
 
 class SubjectResponse(BaseModel):
@@ -72,8 +106,10 @@ class SubjectResponse(BaseModel):
     full_marks: int
     pass_marks: int
     credit_hours: int
+    optional_group: Optional[str] = None
     teacher_id: Optional[UUID] = None
     faculty_id: Optional[UUID] = None
+    stream_ids: List[UUID] = Field(default_factory=list)
     is_active: bool
 
     class Config:
@@ -127,6 +163,15 @@ class HSFacultyCreate(BaseModel):
     max_students: int = Field(default=60, ge=1)
 
 
+class HSFacultyUpdate(BaseModel):
+    name_en: Optional[str] = Field(None, min_length=1)
+    name_np: Optional[str] = None
+    code: Optional[str] = Field(None, min_length=1, max_length=20)
+    description: Optional[str] = None
+    max_students: Optional[int] = Field(None, ge=1)
+    is_active: Optional[bool] = None
+
+
 class HSFacultyResponse(BaseModel):
     id: UUID
     name_en: str
@@ -146,6 +191,13 @@ class HSStreamCreate(BaseModel):
     name_en: str = Field(..., min_length=1)
     name_np: Optional[str] = None
     code: str = Field(..., max_length=20)
+
+
+class HSStreamUpdate(BaseModel):
+    name_en: Optional[str] = Field(None, min_length=1)
+    name_np: Optional[str] = None
+    code: Optional[str] = Field(None, min_length=1, max_length=20)
+    is_active: Optional[bool] = None
 
 
 class HSStreamResponse(BaseModel):

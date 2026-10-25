@@ -3,7 +3,7 @@ Nepal School Management System - Student Model
 Student profile, enrollment, and guardian data
 """
 
-from datetime import datetime, date
+from datetime import datetime
 from sqlalchemy import Column, String, Boolean, DateTime, Date, Integer, Text, ForeignKey, Enum as SQLEnum
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship

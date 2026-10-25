@@ -1,7 +1,7 @@
 """Add tenant, student, and academic models
 
 Revision ID: 002_tenant_student_academic
-Revises: 001_initial_auth_models
+Revises: 001
 Create Date: 2026-06-28
 """
 from alembic import op
@@ -9,7 +9,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 revision = '002_tenant_student_academic'
-down_revision = '001_initial_auth_models'
+down_revision = '001'
 branch_labels = None
 depends_on = None
 

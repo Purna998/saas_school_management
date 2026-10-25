@@ -16,6 +16,7 @@ from sqlalchemy import (
     Text,
     Index,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.dialects.postgresql import UUID
 
@@ -48,7 +49,7 @@ class Attendance(Base, BaseModel, TimestampMixin, TenantMixin):
         UUID(as_uuid=True),
         nullable=False,
         index=True,
-        comment="FK to student (validated at service level across microservices)",
+        comment="Student identifier validated by the attendance module",
     )
 
     # Class information (denormalized for fast queries)
@@ -113,6 +114,17 @@ class Attendance(Base, BaseModel, TimestampMixin, TenantMixin):
             "date_ad",
             "period_number",
             name="uq_attendance_student_date_period",
+        ),
+        # PostgreSQL considers NULL values distinct in a normal unique
+        # constraint. This partial index keeps daily (non-period) attendance
+        # idempotent when a class register is saved more than once.
+        Index(
+            "uq_attendance_daily_student_date",
+            "school_id",
+            "student_id",
+            "date_ad",
+            unique=True,
+            postgresql_where=text("period_number IS NULL"),
         ),
         # Composite indexes for common queries
         Index(

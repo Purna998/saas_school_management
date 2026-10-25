@@ -4,6 +4,7 @@ Master script to setup database, run migrations, and seed data
 """
 
 import asyncio
+import subprocess
 import sys
 from pathlib import Path
 
@@ -11,16 +12,14 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from sqlalchemy.ext.asyncio import create_async_engine
-from sqlalchemy import text
+from sqlalchemy import inspect, text
 
 from shared.config.settings import settings
 from shared.database.base import Base, engine as default_engine
 
-# Import all models to register them
-from services.auth.models.user import User, user_roles
-from services.auth.models.role import Role, Permission, role_permissions
-from services.auth.models.mfa import MFASecret
-from services.auth.models.session import UserSession, LoginAttempt
+# Register every domain model with the shared metadata. This helper is intended
+# for local bootstrap; production schema changes use Alembic.
+from shared.database.models import MODEL_MODULES
 
 
 async def create_database():
@@ -54,18 +53,43 @@ async def create_database():
     await engine.dispose()
 
 
-async def create_tables():
-    """Create all tables"""
-    print("\nStep 2: Creating tables...")
+async def get_table_names() -> set[str]:
+    async with default_engine.connect() as connection:
+        return set(
+            await connection.run_sync(
+                lambda sync_connection: inspect(sync_connection).get_table_names()
+            )
+        )
 
-    async with default_engine.begin() as conn:
-        # Drop all tables (for fresh setup)
-        # await conn.run_sync(Base.metadata.drop_all)
-        # print("  - Dropped existing tables")
 
-        # Create all tables
-        await conn.run_sync(Base.metadata.create_all)
-        print("[OK] All tables created successfully")
+def run_alembic(command: str) -> None:
+    subprocess.run(
+        [sys.executable, "-m", "alembic", command, "head"],
+        cwd=Path(__file__).parent.parent,
+        check=True,
+    )
+
+
+async def prepare_schema():
+    """Migrate a new database or adopt a complete legacy local schema."""
+    print("\nStep 2: Applying database migrations...")
+    assert MODEL_MODULES
+    tables = await get_table_names()
+
+    if tables and "alembic_version" not in tables:
+        missing_tables = set(Base.metadata.tables) - tables
+        if missing_tables:
+            missing = ", ".join(sorted(missing_tables))
+            raise RuntimeError(
+                "Existing unversioned database is incomplete; refusing to stamp it. "
+                f"Missing tables: {missing}"
+            )
+        run_alembic("stamp")
+        print("[OK] Adopted complete legacy schema at the current migration revision")
+        return
+
+    run_alembic("upgrade")
+    print("[OK] Database migrations applied")
 
 
 async def seed_data():
@@ -98,8 +122,6 @@ async def verify_setup():
     """Verify database setup"""
     print("\nStep 4: Verifying setup...")
 
-    from sqlalchemy import select
-
     async with default_engine.connect() as conn:
         # Count roles
         result = await conn.execute(text("SELECT COUNT(*) FROM roles"))
@@ -125,14 +147,14 @@ async def main():
     """Main setup function"""
     try:
         await create_database()
-        await create_tables()
+        await prepare_schema()
         await seed_data()
         await verify_setup()
 
         print("\nNext steps:")
         print("  1. Ensure your local Redis service is running on port 6379")
-        print("  2. Start Auth Service: uvicorn services.auth.main:app --reload --port 8001")
-        print("  3. Access API Docs: http://localhost:8001/docs")
+        print("  2. Start the API: uvicorn main:app --reload --port 8000")
+        print("  3. Access API Docs: http://localhost:8000/docs")
         print("  4. Try logging in with demo credentials")
         print()
 

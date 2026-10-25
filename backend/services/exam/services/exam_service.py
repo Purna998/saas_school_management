@@ -28,10 +28,13 @@ from services.exam.models.exam import (
 )
 from services.exam.schemas.exam import (
     ExamCreate,
+    ExamUpdate,
     ExamStatusUpdate,
     MarkEntryRequest,
     MarkEntry,
 )
+from services.academic.models.academic import Grade, Subject
+from services.student.models.student import Student, StudentStatus
 
 logger = logging.getLogger(__name__)
 
@@ -113,6 +116,27 @@ class ExamService:
         Returns:
             Created Exam object with subjects loaded
         """
+        if data.subjects:
+            subject_ids = [subject.subject_id for subject in data.subjects]
+            subjects_result = await self.db.execute(
+                select(Subject.id)
+                .join(Grade, Subject.grade_id == Grade.id)
+                .where(
+                    Subject.id.in_(subject_ids),
+                    Subject.school_id == school_id,
+                    Subject.is_active.is_(True),
+                    Grade.school_id == school_id,
+                    Grade.grade_number == data.grade,
+                    Grade.is_active.is_(True),
+                )
+            )
+            valid_subject_ids = set(subjects_result.scalars().all())
+            invalid_ids = set(subject_ids) - valid_subject_ids
+            if invalid_ids:
+                raise ValueError(
+                    "Every selected subject must be active and belong to the exam grade"
+                )
+
         exam = Exam(
             id=uuid.uuid4(),
             school_id=school_id,
@@ -146,6 +170,45 @@ class ExamService:
 
         # Reload with relationships
         return await self.get_exam(exam.id, school_id)
+
+    async def update_exam(
+        self,
+        exam_id: uuid.UUID,
+        data: ExamUpdate,
+        school_id: uuid.UUID,
+    ) -> Exam:
+        """Update editable exam details while the exam is still a draft."""
+        exam = await self.get_exam(exam_id, school_id)
+        if exam.status != ExamStatus.DRAFT:
+            raise ValueError("Only draft exams can be edited")
+
+        values = data.model_dump(exclude_unset=True)
+        start_date = values.get("start_date_ad", exam.start_date_ad)
+        end_date = values.get("end_date_ad", exam.end_date_ad)
+        if start_date and end_date and end_date < start_date:
+            raise ValueError("Exam end date must be on or after start date")
+        for field, value in values.items():
+            setattr(exam, field, value)
+
+        await self.db.flush()
+        await self.db.refresh(exam)
+        return await self.get_exam(exam.id, school_id)
+
+    async def delete_exam(self, exam_id: uuid.UUID, school_id: uuid.UUID) -> None:
+        """Soft-delete a draft exam and its unused configuration."""
+        exam = await self.get_exam(exam_id, school_id)
+        if exam.status != ExamStatus.DRAFT:
+            raise ValueError("Only draft exams can be deleted")
+        marks_count = await self.db.scalar(
+            select(func.count(Mark.id)).where(
+                Mark.exam_id == exam_id,
+                Mark.school_id == school_id,
+            )
+        )
+        if marks_count:
+            raise ValueError("An exam with entered marks cannot be deleted")
+        exam.soft_delete()
+        await self.db.flush()
 
     async def get_exam(self, exam_id: uuid.UUID, school_id: uuid.UUID) -> Exam:
         """
@@ -268,7 +331,8 @@ class ExamService:
             ExamStatus.DRAFT: [ExamStatus.SCHEDULED],
             ExamStatus.SCHEDULED: [ExamStatus.ONGOING, ExamStatus.DRAFT],
             ExamStatus.ONGOING: [ExamStatus.COMPLETED],
-            ExamStatus.COMPLETED: [ExamStatus.PUBLISHED],
+            # Publishing has its own permission and verifies calculated results.
+            ExamStatus.COMPLETED: [],
             ExamStatus.PUBLISHED: [],
         }
 
@@ -351,6 +415,20 @@ class ExamService:
         exam_id = exam_subject.exam_id
         grade_level = exam_subject.exam.grade
         student_ids = [entry.student_id for entry in data.entries]
+        students_result = await self.db.execute(
+            select(Student.id).where(
+                Student.id.in_(student_ids),
+                Student.school_id == school_id,
+                Student.current_grade == grade_level,
+                Student.status == StudentStatus.ACTIVE,
+                Student.is_deleted.is_(False),
+            )
+        )
+        valid_student_ids = set(students_result.scalars().all())
+        if set(student_ids) != valid_student_ids:
+            raise ValueError(
+                "Every student must be active, belong to this school, and match the exam grade"
+            )
         existing_result = await self.db.execute(
             select(Mark).where(
                 Mark.school_id == school_id,
@@ -377,8 +455,10 @@ class ExamService:
 
             # Calculate grade point for GPA system (grades 1-10)
             grade_point = None
-            if grade_level <= 10:
+            if grade_level <= 10 and not entry.is_absent:
                 grade_point = calculate_grade_point(entry.marks_obtained, full_marks)
+            elif grade_level <= 10:
+                grade_point = Decimal("0.0")
 
             existing_mark = existing_by_student.get(entry.student_id)
 
@@ -386,6 +466,7 @@ class ExamService:
                 # Update existing mark
                 existing_mark.marks_obtained = entry.marks_obtained
                 existing_mark.grade_point = grade_point
+                existing_mark.is_absent = entry.is_absent
                 existing_mark.remarks = entry.remarks
                 existing_mark.entered_by = entered_by
             else:
@@ -398,6 +479,7 @@ class ExamService:
                     student_id=entry.student_id,
                     marks_obtained=entry.marks_obtained,
                     grade_point=grade_point,
+                    is_absent=entry.is_absent,
                     remarks=entry.remarks,
                     entered_by=entered_by,
                 )
@@ -419,6 +501,32 @@ class ExamService:
             f"{len(created_marks)} entries by user {entered_by}"
         )
         return created_marks
+
+    async def get_marks(
+        self,
+        exam_subject_id: uuid.UUID,
+        school_id: uuid.UUID,
+    ) -> tuple[ExamSubject, List[Mark]]:
+        """Return the saved mark sheet for one tenant-owned exam subject."""
+        subject_result = await self.db.execute(
+            select(ExamSubject)
+            .where(ExamSubject.id == exam_subject_id)
+            .options(selectinload(ExamSubject.exam))
+        )
+        exam_subject = subject_result.scalar_one_or_none()
+        if not exam_subject or exam_subject.exam.school_id != school_id:
+            raise RecordNotFoundError(
+                f"Exam subject with ID {exam_subject_id} not found"
+            )
+        marks_result = await self.db.execute(
+            select(Mark)
+            .where(
+                Mark.exam_subject_id == exam_subject_id,
+                Mark.school_id == school_id,
+            )
+            .order_by(Mark.student_id)
+        )
+        return exam_subject, list(marks_result.scalars().all())
 
     # ============================================================
     # Result Calculation
@@ -493,6 +601,12 @@ class ExamService:
             total_full = Decimal("0")
             grade_points = []
             all_passed = True
+            has_absence = False
+
+            if {mark.exam_subject_id for mark in marks} != set(subject_map):
+                raise ValueError(
+                    "Marks or absence must be entered for every subject before calculating results"
+                )
 
             for mark in marks:
                 subject = subject_map.get(mark.exam_subject_id)
@@ -501,6 +615,7 @@ class ExamService:
 
                 total_obtained += mark.marks_obtained
                 total_full += subject.full_marks
+                has_absence = has_absence or mark.is_absent
 
                 # Check if student passed this subject
                 if mark.marks_obtained < subject.pass_marks:
@@ -533,7 +648,7 @@ class ExamService:
                     )
 
             # Determine result status
-            if not marks:
+            if has_absence:
                 result_status = ResultStatus.ABSENT
             elif not all_passed:
                 result_status = ResultStatus.FAIL
@@ -644,6 +759,22 @@ class ExamService:
         )
         student_marks = marks_query.scalars().all()
 
+        student_name_result = await self.db.execute(
+            select(Student.full_name_en).where(
+                Student.id == student_id,
+                Student.school_id == school_id,
+            )
+        )
+        student_name = student_name_result.scalar_one_or_none()
+        subject_ids = [mark.exam_subject.subject_id for mark in student_marks]
+        subject_names_result = await self.db.execute(
+            select(Subject.id, Subject.name_en).where(
+                Subject.id.in_(subject_ids),
+                Subject.school_id == school_id,
+            )
+        )
+        subject_names = dict(subject_names_result.all())
+
         # Build subject results
         subjects = []
         full_marks_total = Decimal("0")
@@ -652,10 +783,11 @@ class ExamService:
             full_marks_total += exam_subject.full_marks
             subjects.append({
                 "subject_id": exam_subject.subject_id,
-                "subject_name": None,  # To be resolved by API layer
+                "subject_name": subject_names.get(exam_subject.subject_id),
                 "full_marks": exam_subject.full_marks,
                 "pass_marks": exam_subject.pass_marks,
                 "marks_obtained": mark.marks_obtained,
+                "is_absent": mark.is_absent,
                 "grade_point": mark.grade_point,
                 "remarks": mark.remarks,
             })
@@ -664,7 +796,7 @@ class ExamService:
 
         return {
             "student_id": student_id,
-            "student_name": None,  # To be resolved by API layer
+            "student_name": student_name,
             "exam_id": exam_id,
             "exam_name": exam.name,
             "exam_type": exam.exam_type.value,

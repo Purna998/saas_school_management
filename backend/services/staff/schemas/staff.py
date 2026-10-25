@@ -59,8 +59,12 @@ class StaffCreate(BaseModel):
 class StaffUpdate(BaseModel):
     """Update staff schema"""
 
+    employee_id: Optional[str] = Field(None, max_length=30)
     full_name_en: Optional[str] = Field(None, min_length=2, max_length=200)
     full_name_np: Optional[str] = Field(None, max_length=200)
+    gender: Optional[str] = Field(None, description="Gender: male, female, other")
+    date_of_birth_ad: Optional[date] = None
+    date_of_birth_bs: Optional[str] = None
     phone: Optional[str] = Field(None, max_length=20)
     email: Optional[EmailStr] = None
     address: Optional[str] = None
@@ -72,6 +76,8 @@ class StaffUpdate(BaseModel):
     status: Optional[str] = Field(None, description="Status: active, on_leave, resigned, retired, terminated")
     salary: Optional[Decimal] = Field(None, ge=0)
     staff_type: Optional[str] = None
+    joined_date_ad: Optional[date] = None
+    joined_date_bs: Optional[str] = None
 
 
 class StaffResponse(BaseModel):

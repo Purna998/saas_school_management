@@ -3,15 +3,21 @@ Nepal School Management System - Academic Models
 Grades, Sections, Subjects, Timetable, and Higher Secondary (Faculty/Stream)
 """
 
-import uuid
-from datetime import datetime
-from sqlalchemy import Column, String, Boolean, Integer, ForeignKey, Text, Enum as SQLEnum, Time
+from sqlalchemy import Column, String, Boolean, Integer, ForeignKey, Text, Enum as SQLEnum, Time, Table
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 import enum
 
 from shared.database.base import Base
 from shared.database.base_model import BaseModel, TimestampMixin, TenantMixin
+
+
+subject_streams = Table(
+    "subject_streams",
+    Base.metadata,
+    Column("subject_id", UUID(as_uuid=True), ForeignKey("subjects.id", ondelete="CASCADE"), primary_key=True),
+    Column("stream_id", UUID(as_uuid=True), ForeignKey("hs_streams.id", ondelete="CASCADE"), primary_key=True),
+)
 
 
 class SubjectType(str, enum.Enum):
@@ -59,6 +65,7 @@ class Section(Base, BaseModel, TimestampMixin, TenantMixin):
     name = Column(String(10), nullable=False, comment="Section name (A, B, C)")
     capacity = Column(Integer, default=40, comment="Maximum students")
     class_teacher_id = Column(UUID(as_uuid=True), nullable=True, comment="Class teacher user ID")
+    stream_id = Column(UUID(as_uuid=True), ForeignKey("hs_streams.id"), nullable=True, comment="Grade 11-12 subject combination")
     is_active = Column(Boolean, default=True, nullable=False)
 
     # Relationships
@@ -81,6 +88,7 @@ class Subject(Base, BaseModel, TimestampMixin, TenantMixin):
     full_marks = Column(Integer, default=100, comment="Full marks")
     pass_marks = Column(Integer, default=40, comment="Pass marks")
     credit_hours = Column(Integer, default=4, comment="Credit hours")
+    optional_group = Column(String(30), nullable=True, comment="Optional subject basket/group")
     teacher_id = Column(UUID(as_uuid=True), nullable=True, comment="Assigned teacher")
     is_active = Column(Boolean, default=True, nullable=False)
 
@@ -90,6 +98,7 @@ class Subject(Base, BaseModel, TimestampMixin, TenantMixin):
     # Relationships
     grade = relationship("Grade", back_populates="subjects")
     faculty = relationship("HSFaculty", back_populates="subjects")
+    streams = relationship("HSStream", secondary=subject_streams, back_populates="subjects")
 
     def __repr__(self):
         return f"<Subject(code={self.code}, name={self.name_en})>"
@@ -151,6 +160,7 @@ class HSStream(Base, BaseModel, TimestampMixin, TenantMixin):
 
     # Relationships
     faculty = relationship("HSFaculty", back_populates="streams")
+    subjects = relationship("Subject", secondary=subject_streams, back_populates="streams")
 
     def __repr__(self):
         return f"<HSStream(code={self.code}, faculty={self.faculty_id})>"

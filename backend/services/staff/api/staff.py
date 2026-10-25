@@ -15,21 +15,16 @@ from shared.utils.exceptions import (
     RecordNotFoundError,
     DuplicateRecordError,
 )
-from services.auth.dependencies.auth import (
-    get_current_active_user,
-    require_permission,
-)
+from services.auth.dependencies.auth import require_permission
 from services.auth.models.user import User
 from services.staff.schemas.staff import (
     StaffCreate,
     StaffUpdate,
     StaffResponse,
-    StaffListResponse,
     LeaveRequestCreate,
     LeaveResponse,
     StaffAttendanceMarkRequest,
     StaffAttendanceResponse,
-    AttendanceSummary,
 )
 from services.staff.services.staff_service import StaffService
 
@@ -181,7 +176,7 @@ async def list_staff(
     )
 
 
-@router.get("/{staff_id}")
+@router.get("/{staff_id:uuid}")
 async def get_staff(
     staff_id: uuid.UUID,
     current_user: User = Depends(require_permission("staff:read")),
@@ -208,7 +203,7 @@ async def get_staff(
         )
 
 
-@router.patch("/{staff_id}")
+@router.patch("/{staff_id:uuid}")
 async def update_staff(
     staff_id: uuid.UUID,
     staff_data: StaffUpdate,
@@ -249,6 +244,28 @@ async def update_staff(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=error_response(str(e), "INVALID_DATA"),
+        )
+
+
+@router.delete("/{staff_id:uuid}")
+async def delete_staff(
+    staff_id: uuid.UUID,
+    current_user: User = Depends(require_permission("staff:delete")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Soft-delete a staff member while preserving historical records."""
+    try:
+        service = StaffService(db)
+        await service.delete_staff(
+            staff_id=staff_id,
+            school_id=current_user.school_id,
+            deleted_by=current_user.id,
+        )
+        return success_response(data={"id": str(staff_id), "deleted": True})
+    except RecordNotFoundError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=error_response(str(e), "STAFF_NOT_FOUND"),
         )
 
 
@@ -399,7 +416,7 @@ async def mark_staff_attendance(
     )
 
 
-@router.get("/{staff_id}/attendance")
+@router.get("/{staff_id:uuid}/attendance")
 async def get_staff_attendance(
     staff_id: uuid.UUID,
     start_date: Optional[date] = Query(default=None, description="Start date filter (AD)"),
@@ -443,7 +460,7 @@ async def get_staff_attendance(
         )
 
 
-@router.get("/{staff_id}/attendance/summary")
+@router.get("/{staff_id:uuid}/attendance/summary")
 async def get_staff_attendance_summary(
     staff_id: uuid.UUID,
     start_date: date = Query(..., description="Summary period start date (AD)"),

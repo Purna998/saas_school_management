@@ -3,22 +3,23 @@ Nepal School Management System - Student API Routes
 Student management endpoints
 """
 
-import asyncio
 import uuid
 import csv
 import io
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File
+from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from shared.database.base import get_db
 from shared.schemas.responses import success_response, error_response
+from shared.config.settings import settings
+from shared.storage import local_storage
 from shared.utils.exceptions import (
     StudentNotFoundError,
     DuplicateEMISError,
 )
 from services.auth.dependencies.auth import (
-    get_current_active_user,
     require_permission,
 )
 from services.auth.models.user import User
@@ -112,7 +113,7 @@ async def create_student(
         )
 
 
-@router.get("/{student_id}", response_model=StudentResponse)
+@router.get("/{student_id:uuid}", response_model=StudentResponse)
 async def get_student(
     student_id: uuid.UUID,
     current_user: User = Depends(require_permission("student:read")),
@@ -139,7 +140,7 @@ async def get_student(
         )
 
 
-@router.patch("/{student_id}", response_model=StudentResponse)
+@router.patch("/{student_id:uuid}", response_model=StudentResponse)
 async def update_student(
     student_id: uuid.UUID,
     student_data: StudentUpdate,
@@ -168,7 +169,7 @@ async def update_student(
         )
 
 
-@router.delete("/{student_id}")
+@router.delete("/{student_id:uuid}")
 async def delete_student(
     student_id: uuid.UUID,
     current_user: User = Depends(require_permission("student:delete")),
@@ -323,7 +324,7 @@ async def bulk_import_students(
     return BulkImportResponse(**result)
 
 
-@router.post("/{student_id}/upload-photo")
+@router.post("/{student_id:uuid}/upload-photo")
 async def upload_student_photo(
     student_id: uuid.UUID,
     file: UploadFile = File(...),
@@ -338,9 +339,6 @@ async def upload_student_photo(
         - 400: Invalid file
         - 404: Student not found
     """
-    import os
-    from shared.config.settings import settings
-
     service = StudentService(db)
     student = await service.get_student(student_id, current_user.school_id)
 
@@ -359,19 +357,50 @@ async def upload_student_photo(
             detail=error_response(f"File size exceeds {settings.max_upload_size_mb}MB limit", "FILE_SIZE_EXCEEDED"),
         )
 
-    ext = file.filename.rsplit(".", 1)[-1] if file.filename and "." in file.filename else "jpg"
-    upload_dir = os.path.join("uploads", "photos", "students", str(student.school_id))
-    filename = f"{student.id}.{ext}"
-    filepath = os.path.join(upload_dir, filename)
-    def write_photo() -> None:
-        os.makedirs(upload_dir, exist_ok=True)
-        with open(filepath, "wb") as destination:
-            destination.write(contents)
-
-    await asyncio.to_thread(write_photo)
-
-    photo_url = f"/uploads/photos/students/{student.school_id}/{filename}"
+    filename = await local_storage.save_student_photo(
+        student.school_id,
+        student.id,
+        contents,
+        file.content_type,
+    )
+    photo_url = (
+        f"{settings.public_api_url.rstrip('/')}/api/v1/students/"
+        f"{student.id}/photo/{filename}"
+    )
     student.photo_url = photo_url
     await db.commit()
 
     return success_response(data={"photo_url": photo_url})
+
+
+@router.get("/{student_id:uuid}/photo/{filename}", response_class=FileResponse)
+async def get_student_photo(
+    student_id: uuid.UUID,
+    filename: str,
+    current_user: User = Depends(require_permission("student:read")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Serve a student's current photo to authorized users in the same school."""
+    service = StudentService(db)
+    student = await service.get_student(student_id, current_user.school_id)
+    expected_url = (
+        f"{settings.public_api_url.rstrip('/')}/api/v1/students/"
+        f"{student.id}/photo/{filename}"
+    )
+    if student.photo_url != expected_url:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Photo not found")
+
+    try:
+        path = local_storage.student_photo_path(
+            student.school_id,
+            student.id,
+            filename,
+        )
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Photo not found")
+
+    if not path.is_file():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Photo not found")
+
+    media_type = "image/png" if path.suffix.lower() == ".png" else "image/jpeg"
+    return FileResponse(path, media_type=media_type)

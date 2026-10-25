@@ -8,12 +8,10 @@ import logging
 from typing import Optional, List, Tuple
 from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
+from sqlalchemy import String, cast, select, func
 from sqlalchemy.orm import selectinload
 
 from shared.utils.exceptions import (
-    RecordNotFoundError,
-    DuplicateRecordError,
     DuplicateEMISError,
     StudentNotFoundError,
 )
@@ -27,7 +25,7 @@ from services.student.models.student import (
     CasteEthnicity,
     GuardianRelation,
 )
-from services.student.schemas.student import StudentCreate, StudentUpdate, GuardianCreate
+from services.student.schemas.student import StudentCreate, StudentUpdate
 
 logger = logging.getLogger(__name__)
 
@@ -198,7 +196,8 @@ class StudentService:
                 (Student.full_name_en.ilike(pattern)) |
                 (Student.full_name_np.ilike(pattern)) |
                 (Student.emis_student_id.ilike(pattern)) |
-                (Student.admission_number.ilike(pattern))
+                (Student.admission_number.ilike(pattern)) |
+                (cast(Student.roll_number, String).ilike(pattern))
             )
 
         if grade:
@@ -241,7 +240,8 @@ class StudentService:
                 (Student.full_name_en.ilike(pattern)) |
                 (Student.full_name_np.ilike(pattern)) |
                 (Student.emis_student_id.ilike(pattern)) |
-                (Student.admission_number.ilike(pattern))
+                (Student.admission_number.ilike(pattern)) |
+                (cast(Student.roll_number, String).ilike(pattern))
             )
             .limit(limit)
             .options(selectinload(Student.guardians))

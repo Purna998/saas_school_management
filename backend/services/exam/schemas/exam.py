@@ -7,7 +7,7 @@ from typing import Optional, List
 from uuid import UUID
 from datetime import date, time, datetime
 from decimal import Decimal
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 # ============================================================
@@ -23,6 +23,14 @@ class ExamSubjectCreate(BaseModel):
     exam_date_ad: Optional[date] = Field(None, description="Exam date for this subject (AD)")
     start_time: Optional[time] = Field(None, description="Exam start time")
     end_time: Optional[time] = Field(None, description="Exam end time")
+
+    @model_validator(mode="after")
+    def validate_marks_and_time(self):
+        if self.pass_marks > self.full_marks:
+            raise ValueError("Pass marks cannot exceed full marks")
+        if self.start_time and self.end_time and self.end_time <= self.start_time:
+            raise ValueError("Subject end time must be after start time")
+        return self
 
 
 class ExamSubjectResponse(BaseModel):
@@ -51,7 +59,8 @@ class ExamCreate(BaseModel):
     start_date_ad: Optional[date] = Field(None, description="Exam start date (AD)")
     end_date_ad: Optional[date] = Field(None, description="Exam end date (AD)")
     subjects: List[ExamSubjectCreate] = Field(
-        default_factory=list,
+        ...,
+        min_length=1,
         description="Subject configurations for this exam"
     )
 
@@ -77,6 +86,15 @@ class ExamCreate(BaseModel):
             }
         }
 
+    @model_validator(mode="after")
+    def validate_exam(self):
+        if self.start_date_ad and self.end_date_ad and self.end_date_ad < self.start_date_ad:
+            raise ValueError("Exam end date must be on or after start date")
+        subject_ids = [subject.subject_id for subject in self.subjects]
+        if len(subject_ids) != len(set(subject_ids)):
+            raise ValueError("An exam subject may only be selected once")
+        return self
+
 
 class ExamUpdate(BaseModel):
     """Update exam schema"""
@@ -84,6 +102,12 @@ class ExamUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=3, max_length=255)
     start_date_ad: Optional[date] = None
     end_date_ad: Optional[date] = None
+
+    @model_validator(mode="after")
+    def validate_dates(self):
+        if self.start_date_ad and self.end_date_ad and self.end_date_ad < self.start_date_ad:
+            raise ValueError("Exam end date must be on or after start date")
+        return self
 
 
 class ExamStatusUpdate(BaseModel):
@@ -130,8 +154,17 @@ class MarkEntry(BaseModel):
     """Single mark entry for a student"""
 
     student_id: UUID = Field(..., description="Student UUID")
-    marks_obtained: Decimal = Field(..., ge=0, description="Marks obtained")
+    marks_obtained: Optional[Decimal] = Field(None, ge=0, description="Marks obtained")
+    is_absent: bool = Field(False, description="Student was absent for this subject exam")
     remarks: Optional[str] = Field(None, max_length=500, description="Remarks")
+
+    @model_validator(mode="after")
+    def validate_mark_or_absence(self):
+        if not self.is_absent and self.marks_obtained is None:
+            raise ValueError("Marks are required unless the student is absent")
+        if self.is_absent:
+            self.marks_obtained = Decimal("0")
+        return self
 
 
 class MarkEntryRequest(BaseModel):
@@ -139,6 +172,14 @@ class MarkEntryRequest(BaseModel):
 
     exam_subject_id: UUID = Field(..., description="Exam subject UUID")
     entries: List[MarkEntry] = Field(..., min_length=1, description="List of mark entries")
+
+    @field_validator("entries")
+    @classmethod
+    def validate_unique_students(cls, entries: List[MarkEntry]) -> List[MarkEntry]:
+        student_ids = [entry.student_id for entry in entries]
+        if len(student_ids) != len(set(student_ids)):
+            raise ValueError("Each student may appear only once in a marks batch")
+        return entries
 
     class Config:
         json_schema_extra = {
@@ -167,6 +208,7 @@ class MarkResponse(BaseModel):
     exam_subject_id: UUID
     student_id: UUID
     marks_obtained: Decimal
+    is_absent: bool = False
     grade_point: Optional[Decimal] = None
     remarks: Optional[str] = None
     entered_by: UUID
@@ -199,6 +241,7 @@ class SubjectResult(BaseModel):
     full_marks: Decimal
     pass_marks: Decimal
     marks_obtained: Decimal
+    is_absent: bool = False
     grade_point: Optional[Decimal] = None
     remarks: Optional[str] = None
 

@@ -183,6 +183,12 @@ class Mark(Base, BaseModel, TimestampMixin, TenantMixin):
         nullable=False,
         comment="Marks obtained by student"
     )
+    is_absent = Column(
+        Boolean,
+        default=False,
+        nullable=False,
+        comment="Whether the student was absent for this subject exam",
+    )
     grade_point = Column(
         Numeric(3, 1),
         nullable=True,

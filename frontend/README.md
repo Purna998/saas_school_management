@@ -14,7 +14,15 @@ pnpm dev
 bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3001](http://localhost:3001) with your browser to see the result.
+
+For normal browsing and LCP measurements, stop the development server and run:
+
+```bash
+npm run preview
+```
+
+This builds the app and starts the optimized server on port 3001. Routes are compiled before serving requests, rather than on the first visit. Use `npm run start` to reuse an existing build. Rebuild after frontend code or environment changes; use `npm run dev` when you need hot reload.
 
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 

@@ -9,7 +9,7 @@ import logging
 from typing import Optional, List, Tuple
 from datetime import date
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, and_
+from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
 
 from shared.utils.exceptions import (
@@ -131,19 +131,35 @@ class StaffService:
             )
 
         for field, value in update_fields.items():
-            if value is not None:
+            if field in {"status", "staff_type", "gender"}:
+                if value is None:
+                    continue
                 if field == "status":
                     setattr(staff, field, StaffStatus(value))
                 elif field == "staff_type":
                     setattr(staff, field, StaffType(value))
-                else:
-                    setattr(staff, field, value)
+                elif field == "gender":
+                    setattr(staff, field, Gender(value))
+            else:
+                setattr(staff, field, value)
 
         await self.db.commit()
         await self.db.refresh(staff)
 
         logger.info(f"Staff updated: {staff.full_name_en}")
         return staff
+
+    async def delete_staff(
+        self,
+        staff_id: uuid.UUID,
+        school_id: uuid.UUID,
+        deleted_by: Optional[uuid.UUID] = None,
+    ) -> None:
+        """Soft-delete a staff member within the current school."""
+        staff = await self.get_staff(staff_id, school_id)
+        staff.soft_delete(deleted_by)
+        await self.db.commit()
+        logger.info(f"Staff deleted: {staff.full_name_en} (ID: {staff.id})")
 
     async def list_staff(
         self,
@@ -458,7 +474,7 @@ class StaffService:
             Tuple of (attendance records, total count)
         """
         # Verify staff exists
-        await self.get_staff(staff_id)
+        await self.get_staff(staff_id, school_id)
 
         query = select(StaffAttendance).where(
             StaffAttendance.staff_id == staff_id,
@@ -504,7 +520,7 @@ class StaffService:
         Returns:
             Attendance summary dictionary
         """
-        staff = await self.get_staff(staff_id)
+        staff = await self.get_staff(staff_id, school_id)
 
         # Get all attendance records in range
         result = await self.db.execute(

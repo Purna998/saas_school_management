@@ -1,88 +1,78 @@
 @echo off
-REM Nepal SMS - Quick Start Script for Local Development (Windows)
+setlocal
+cd /d "%~dp0"
+
+set "BACKEND_DIR=%CD%\backend"
+set "FRONTEND_DIR=%CD%\frontend"
+set "PYTHON=%BACKEND_DIR%\.venv\Scripts\python.exe"
+set "FRONTEND_MODE=dev"
+if /I "%~1"=="preview" set "FRONTEND_MODE=preview"
 
 echo ======================================
-echo Nepal SMS - Local Development Setup
+echo Nepal SMS - Local Development
 echo ======================================
-echo.
 
-REM Check if Docker is running
-docker info >nul 2>&1
+if not exist "%PYTHON%" (
+    echo [INFO] Creating the backend virtual environment...
+    python -m venv "%BACKEND_DIR%\.venv" || goto :error
+)
+
+"%PYTHON%" --version >nul 2>&1
 if errorlevel 1 (
-    echo [ERROR] Docker is not running. Please start Docker Desktop.
-    pause
-    exit /b 1
+    echo [ERROR] The existing backend virtual environment is broken.
+    echo Delete backend\.venv and run this script again.
+    goto :error
 )
 
-echo [OK] Docker is running
-echo.
+"%PYTHON%" -m pip --version >nul 2>&1
+if errorlevel 1 "%PYTHON%" -m ensurepip --upgrade || goto :error
 
-REM Check if .env exists
-if not exist .env (
-    echo [INFO] Creating .env from .env.example
-    copy .env.example .env
-    echo [OK] .env created
-)
-
-REM Check if keys exist
-if not exist keys\private_key.pem (
-    echo [INFO] Generating RSA keys for JWT using Docker
-    mkdir keys 2>nul
-    docker run --rm -v %CD%/keys:/keys alpine/openssl genrsa -out /keys/private_key.pem 2048
-    docker run --rm -v %CD%/keys:/keys alpine/openssl rsa -in /keys/private_key.pem -pubout -out /keys/public_key.pem
-    echo [OK] JWT keys generated
-)
-
-echo.
-echo Step 1: Starting Infrastructure (PostgreSQL + Redis)
-echo -------------------------------------------------------
-docker-compose up -d postgres redis
-
-echo.
-echo Waiting for services to be healthy...
-timeout /t 10 /nobreak >nul
-
-echo.
-echo Step 2: Setting up Database
-echo -------------------------------------------------------
-docker-compose run --rm backend python scripts/setup_database.py
+"%PYTHON%" -c "import fastapi, sqlalchemy, redis, asyncpg, pydantic_settings, jwt, pyotp, qrcode" >nul 2>&1
 if errorlevel 1 (
-    echo [WARN] Database setup failed or already completed
+    echo [INFO] Installing backend dependencies...
+    "%PYTHON%" -m pip install -r "%BACKEND_DIR%\requirements-local.txt" || goto :error
 )
 
-echo.
-echo Step 3: Starting Backend Services
-echo -------------------------------------------------------
-docker-compose up -d auth-service tenant-service student-service academic-service calendar-service
+if not exist "%FRONTEND_DIR%\node_modules" (
+    echo [INFO] Installing frontend dependencies...
+    pushd "%FRONTEND_DIR%"
+    call npm install || (popd & goto :error)
+    popd
+)
+
+if not exist ".env" (
+    copy ".env.example" ".env" >nul || goto :error
+    echo [INFO] Created .env from .env.example
+)
+
+if not exist "keys\jwt_private.pem" (
+    pushd "%BACKEND_DIR%"
+    "%PYTHON%" scripts\generate_jwt_keys.py || (popd & goto :error)
+    popd
+)
+
+echo [INFO] Preparing the local PostgreSQL database...
+pushd "%BACKEND_DIR%"
+"%PYTHON%" scripts\setup_database.py || (popd & goto :services_error)
+popd
+
+start "Nepal SMS API" /D "%BACKEND_DIR%" cmd /k ""%PYTHON%" -m uvicorn main:app --reload --port 8080"
+start "Nepal SMS Frontend" /D "%FRONTEND_DIR%" cmd /k "npm run %FRONTEND_MODE%"
 
 echo.
-echo Waiting for services to start...
-timeout /t 5 /nobreak >nul
+echo [OK] Local applications are starting.
+echo Frontend: http://localhost:3001
+echo API docs: http://localhost:8080/docs
+echo Frontend mode: %FRONTEND_MODE% ^(use start-local.bat preview for performance checks^)
+echo Close the application windows to stop development servers.
+exit /b 0
 
+:services_error
 echo.
-echo ======================================
-echo [OK] Backend Services Started!
-echo ======================================
+echo [ERROR] Database setup failed. Ensure local PostgreSQL is running and .env has the correct credentials.
+exit /b 1
+
+:error
 echo.
-echo Backend Services:
-echo   - Auth Service:     http://localhost:8001/docs
-echo   - Tenant Service:   http://localhost:8002/docs
-echo   - Student Service:  http://localhost:8003/docs
-echo   - Academic Service: http://localhost:8004/docs
-echo   - Calendar Service: http://localhost:8016/docs
-echo.
-echo Database:
-echo   - PostgreSQL: localhost:5432
-echo   - Redis:      localhost:6379
-echo.
-echo ======================================
-echo Now start the Frontend:
-echo   cd frontend
-echo   npm install
-echo   npm run dev
-echo ======================================
-echo.
-echo View logs: docker-compose logs -f auth-service
-echo Stop services: docker-compose down
-echo.
-pause
+echo [ERROR] Local setup failed. Review the message above.
+exit /b 1

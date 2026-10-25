@@ -16,17 +16,16 @@ from alembic import context
 from shared.database.base import Base
 from shared.config.settings import settings
 
-# Import all model modules
-from services.auth.models.user import User, user_roles
-from services.auth.models.role import Role, Permission, role_permissions
-from services.auth.models.mfa import MFASecret
-from services.auth.models.session import UserSession, LoginAttempt
+# Import every domain model so Alembic autogenerate sees the whole monolith.
+from shared.database.models import MODEL_MODULES
+
+assert MODEL_MODULES
 
 # this is the Alembic Config object
 config = context.config
 
 # Override sqlalchemy.url from settings
-config.set_main_option("sqlalchemy.url", settings.database_url.replace("+asyncpg", ""))
+config.set_main_option("sqlalchemy.url", settings.database_url)
 
 # Interpret the config file for Python logging.
 if config.config_file_name is not None:
@@ -34,8 +33,6 @@ if config.config_file_name is not None:
 
 # Add your model's MetaData object here for 'autogenerate' support
 target_metadata = Base.metadata
-
-
 def run_migrations_offline() -> None:
     """
     Run migrations in 'offline' mode.
@@ -80,11 +77,8 @@ async def run_async_migrations() -> None:
     In this scenario we need to create an Engine and associate a connection with
     the context.
     """
-    # Use sync URL for Alembic
-    sync_url = settings.database_url.replace("+asyncpg", "")
-
     configuration = config.get_section(config.config_ini_section)
-    configuration["sqlalchemy.url"] = sync_url
+    configuration["sqlalchemy.url"] = settings.database_url
 
     connectable = async_engine_from_config(
         configuration,

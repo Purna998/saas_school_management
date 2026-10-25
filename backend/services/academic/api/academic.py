@@ -11,27 +11,32 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from shared.database.base import get_db
 from shared.schemas.responses import success_response, error_response
 from shared.utils.exceptions import (
+    RecordNotFoundError,
     GradeNotFoundError,
     SectionNotFoundError,
     SubjectNotFoundError,
     FacultyNotFoundError,
-    HSNotEnabledError,
 )
-from services.auth.dependencies.auth import get_current_active_user, require_permission
+from services.auth.dependencies.auth import require_permission
 from services.auth.models.user import User
 from services.academic.schemas.academic import (
     GradeCreate,
+    GradeUpdate,
     GradeResponse,
     SectionCreate,
+    SectionUpdate,
     SectionResponse,
     SubjectCreate,
+    SubjectUpdate,
     SubjectResponse,
     TimetableEntryCreate,
     TimetableEntryResponse,
     TimetableResponse,
     HSFacultyCreate,
+    HSFacultyUpdate,
     HSFacultyResponse,
     HSStreamCreate,
+    HSStreamUpdate,
     HSStreamResponse,
 )
 from services.academic.services.academic_service import AcademicService
@@ -93,16 +98,17 @@ async def list_grades(
                 SectionResponse(
                     id=s.id, grade_id=s.grade_id, name=s.name,
                     capacity=s.capacity, class_teacher_id=s.class_teacher_id,
+                    stream_id=s.stream_id,
                     is_active=s.is_active,
                 )
-                for s in g.sections
+                for s in g.sections if s.is_active
             ],
         )
         for g in grades
     ]
 
 
-@router.get("/grades/{grade_id}", response_model=GradeResponse)
+@router.get("/grades/{grade_id:uuid}", response_model=GradeResponse)
 async def get_grade(
     grade_id: uuid.UUID,
     current_user: User = Depends(require_permission("academic:read")),
@@ -124,11 +130,44 @@ async def get_grade(
                 SectionResponse(
                     id=s.id, grade_id=s.grade_id, name=s.name,
                     capacity=s.capacity, class_teacher_id=s.class_teacher_id,
+                    stream_id=s.stream_id,
                     is_active=s.is_active,
                 )
-                for s in grade.sections
+                for s in grade.sections if s.is_active
             ],
         )
+    except GradeNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=error_response(str(e), "GRADE_NOT_FOUND"))
+
+
+@router.patch("/grades/{grade_id:uuid}", response_model=GradeResponse)
+async def update_grade(
+    grade_id: uuid.UUID,
+    data: GradeUpdate,
+    current_user: User = Depends(require_permission("academic:create")),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        grade = await AcademicService(db).update_grade(grade_id, data, current_user.school_id)
+        return GradeResponse(
+            id=grade.id, grade_number=grade.grade_number, name_en=grade.name_en,
+            name_np=grade.name_np, is_active=grade.is_active, is_hs=grade.is_hs,
+            academic_year_bs=grade.academic_year_bs,
+            sections=[SectionResponse.model_validate(section) for section in grade.sections if section.is_active],
+        )
+    except GradeNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=error_response(str(e), "GRADE_NOT_FOUND"))
+
+
+@router.delete("/grades/{grade_id:uuid}")
+async def deactivate_grade(
+    grade_id: uuid.UUID,
+    current_user: User = Depends(require_permission("academic:create")),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        await AcademicService(db).deactivate_grade(grade_id, current_user.school_id)
+        return success_response({"id": str(grade_id), "deactivated": True})
     except GradeNotFoundError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=error_response(str(e), "GRADE_NOT_FOUND"))
 
@@ -142,13 +181,12 @@ async def create_section(
     db: AsyncSession = Depends(get_db)
 ):
     """Create a new section in a grade"""
-    service = AcademicService(db)
-    section = await service.create_section(data, current_user.school_id)
-    return SectionResponse(
-        id=section.id, grade_id=section.grade_id, name=section.name,
-        capacity=section.capacity, class_teacher_id=section.class_teacher_id,
-        is_active=section.is_active,
-    )
+    try:
+        service = AcademicService(db)
+        section = await service.create_section(data, current_user.school_id)
+        return SectionResponse.model_validate(section)
+    except (GradeNotFoundError, RecordNotFoundError, ValueError) as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=error_response(str(e), "INVALID_SECTION"))
 
 
 @router.get("/grades/{grade_id}/sections", response_model=list[SectionResponse])
@@ -164,10 +202,40 @@ async def list_sections(
         SectionResponse(
             id=s.id, grade_id=s.grade_id, name=s.name,
             capacity=s.capacity, class_teacher_id=s.class_teacher_id,
+            stream_id=s.stream_id,
             is_active=s.is_active,
         )
         for s in sections
     ]
+
+
+@router.patch("/sections/{section_id:uuid}", response_model=SectionResponse)
+async def update_section(
+    section_id: uuid.UUID,
+    data: SectionUpdate,
+    current_user: User = Depends(require_permission("academic:create")),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        section = await AcademicService(db).update_section(section_id, data, current_user.school_id)
+        return SectionResponse.model_validate(section)
+    except SectionNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=error_response(str(e), "SECTION_NOT_FOUND"))
+    except (GradeNotFoundError, RecordNotFoundError, ValueError) as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=error_response(str(e), "INVALID_SECTION"))
+
+
+@router.delete("/sections/{section_id:uuid}")
+async def deactivate_section(
+    section_id: uuid.UUID,
+    current_user: User = Depends(require_permission("academic:create")),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        await AcademicService(db).deactivate_section(section_id, current_user.school_id)
+        return success_response({"id": str(section_id), "deactivated": True})
+    except SectionNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=error_response(str(e), "SECTION_NOT_FOUND"))
 
 
 # --- Subjects ---
@@ -179,16 +247,21 @@ async def create_subject(
     db: AsyncSession = Depends(get_db)
 ):
     """Create a new subject"""
-    service = AcademicService(db)
-    subject = await service.create_subject(data, current_user.school_id)
-    return SubjectResponse(
-        id=subject.id, grade_id=subject.grade_id, code=subject.code,
-        name_en=subject.name_en, name_np=subject.name_np,
-        subject_type=subject.subject_type.value,
-        full_marks=subject.full_marks, pass_marks=subject.pass_marks,
-        credit_hours=subject.credit_hours, teacher_id=subject.teacher_id,
-        faculty_id=subject.faculty_id, is_active=subject.is_active,
-    )
+    try:
+        service = AcademicService(db)
+        subject = await service.create_subject(data, current_user.school_id)
+        return SubjectResponse(
+            id=subject.id, grade_id=subject.grade_id, code=subject.code,
+            name_en=subject.name_en, name_np=subject.name_np,
+            subject_type=subject.subject_type.value,
+            full_marks=subject.full_marks, pass_marks=subject.pass_marks,
+            credit_hours=subject.credit_hours, optional_group=subject.optional_group,
+            teacher_id=subject.teacher_id,
+            faculty_id=subject.faculty_id, is_active=subject.is_active,
+            stream_ids=[stream.id for stream in subject.streams],
+        )
+    except (GradeNotFoundError, FacultyNotFoundError, RecordNotFoundError, ValueError) as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=error_response(str(e), "INVALID_SUBJECT"))
 
 
 @router.get("/grades/{grade_id}/subjects", response_model=list[SubjectResponse])
@@ -207,11 +280,51 @@ async def list_subjects(
             name_en=s.name_en, name_np=s.name_np,
             subject_type=s.subject_type.value,
             full_marks=s.full_marks, pass_marks=s.pass_marks,
-            credit_hours=s.credit_hours, teacher_id=s.teacher_id,
+            credit_hours=s.credit_hours, optional_group=s.optional_group,
+            teacher_id=s.teacher_id,
             faculty_id=s.faculty_id, is_active=s.is_active,
+            stream_ids=[stream.id for stream in s.streams],
         )
         for s in subjects
     ]
+
+
+@router.patch("/subjects/{subject_id:uuid}", response_model=SubjectResponse)
+async def update_subject(
+    subject_id: uuid.UUID,
+    data: SubjectUpdate,
+    current_user: User = Depends(require_permission("academic:create")),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        subject = await AcademicService(db).update_subject(subject_id, data, current_user.school_id)
+        return SubjectResponse(
+            id=subject.id, grade_id=subject.grade_id, code=subject.code,
+            name_en=subject.name_en, name_np=subject.name_np,
+            subject_type=subject.subject_type.value,
+            full_marks=subject.full_marks, pass_marks=subject.pass_marks,
+            credit_hours=subject.credit_hours, optional_group=subject.optional_group,
+            teacher_id=subject.teacher_id, faculty_id=subject.faculty_id,
+            is_active=subject.is_active,
+            stream_ids=[stream.id for stream in subject.streams],
+        )
+    except SubjectNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=error_response(str(e), "SUBJECT_NOT_FOUND"))
+    except (FacultyNotFoundError, RecordNotFoundError, ValueError) as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=error_response(str(e), "INVALID_SUBJECT"))
+
+
+@router.delete("/subjects/{subject_id:uuid}")
+async def deactivate_subject(
+    subject_id: uuid.UUID,
+    current_user: User = Depends(require_permission("academic:create")),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        await AcademicService(db).deactivate_subject(subject_id, current_user.school_id)
+        return success_response({"id": str(subject_id), "deactivated": True})
+    except SubjectNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=error_response(str(e), "SUBJECT_NOT_FOUND"))
 
 
 # --- Timetable ---
@@ -235,7 +348,7 @@ async def create_timetable_entry(
     )
 
 
-@router.get("/sections/{section_id}/timetable", response_model=TimetableResponse)
+@router.get("/sections/{section_id:uuid}/timetable", response_model=TimetableResponse)
 async def get_timetable(
     section_id: uuid.UUID,
     current_user: User = Depends(require_permission("academic:read")),
@@ -301,14 +414,14 @@ async def list_faculties(
                     name_en=s.name_en, name_np=s.name_np,
                     code=s.code, is_active=s.is_active,
                 )
-                for s in f.streams
+                for s in f.streams if s.is_active
             ],
         )
         for f in faculties
     ]
 
 
-@router.get("/faculties/{faculty_id}", response_model=HSFacultyResponse)
+@router.get("/faculties/{faculty_id:uuid}", response_model=HSFacultyResponse)
 async def get_faculty(
     faculty_id: uuid.UUID,
     current_user: User = Depends(require_permission("academic:read")),
@@ -328,9 +441,41 @@ async def get_faculty(
                     name_en=s.name_en, name_np=s.name_np,
                     code=s.code, is_active=s.is_active,
                 )
-                for s in faculty.streams
+                for s in faculty.streams if s.is_active
             ],
         )
+    except FacultyNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=error_response(str(e), "FACULTY_NOT_FOUND"))
+
+
+@router.patch("/faculties/{faculty_id:uuid}", response_model=HSFacultyResponse)
+async def update_faculty(
+    faculty_id: uuid.UUID,
+    data: HSFacultyUpdate,
+    current_user: User = Depends(require_permission("academic:create")),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        faculty = await AcademicService(db).update_faculty(faculty_id, data, current_user.school_id)
+        return HSFacultyResponse(
+            id=faculty.id, name_en=faculty.name_en, name_np=faculty.name_np,
+            code=faculty.code, description=faculty.description,
+            is_active=faculty.is_active, max_students=faculty.max_students,
+            streams=[HSStreamResponse.model_validate(stream) for stream in faculty.streams if stream.is_active],
+        )
+    except FacultyNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=error_response(str(e), "FACULTY_NOT_FOUND"))
+
+
+@router.delete("/faculties/{faculty_id:uuid}")
+async def deactivate_faculty(
+    faculty_id: uuid.UUID,
+    current_user: User = Depends(require_permission("academic:create")),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        await AcademicService(db).deactivate_faculty(faculty_id, current_user.school_id)
+        return success_response({"id": str(faculty_id), "deactivated": True})
     except FacultyNotFoundError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=error_response(str(e), "FACULTY_NOT_FOUND"))
 
@@ -351,3 +496,30 @@ async def create_stream(
         name_en=stream.name_en, name_np=stream.name_np,
         code=stream.code, is_active=stream.is_active,
     )
+
+
+@router.patch("/streams/{stream_id:uuid}", response_model=HSStreamResponse)
+async def update_stream(
+    stream_id: uuid.UUID,
+    data: HSStreamUpdate,
+    current_user: User = Depends(require_permission("academic:create")),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        stream = await AcademicService(db).update_stream(stream_id, data, current_user.school_id)
+        return HSStreamResponse.model_validate(stream)
+    except RecordNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=error_response(str(e), "STREAM_NOT_FOUND"))
+
+
+@router.delete("/streams/{stream_id:uuid}")
+async def deactivate_stream(
+    stream_id: uuid.UUID,
+    current_user: User = Depends(require_permission("academic:create")),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        await AcademicService(db).deactivate_stream(stream_id, current_user.school_id)
+        return success_response({"id": str(stream_id), "deactivated": True})
+    except RecordNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=error_response(str(e), "STREAM_NOT_FOUND"))

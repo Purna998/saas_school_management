@@ -17,8 +17,8 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
+/lib/
+/lib64/
 parts/
 sdist/
 var/
@@ -107,6 +107,7 @@ reports/*.csv
 # Uploaded files
 uploads/
 media/
+storage/
 
 # Firebase credentials (SENSITIVE)
 firebase-credentials.json
@@ -119,9 +120,6 @@ aws-credentials.json
 # Backup files
 *.backup
 *.old
-
-# Docker
-.dockerignore
 
 # Alembic
 # Keep migration files but ignore local config
@@ -142,4 +140,8 @@ dmypy.json
 cython_debug/
 
 .venv/
-.gitignore/
+
+# Exclude dotfiles and dotfolders at every level.
+# Keep ignore rules versioned so this policy follows future clones.
+.*
+!.gitignore

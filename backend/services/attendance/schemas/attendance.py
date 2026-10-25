@@ -93,6 +93,16 @@ class AttendanceMarkRequest(BaseModel):
             raise ValueError("BS day must be between 1 and 32")
         return v
 
+    @field_validator("entries")
+    @classmethod
+    def validate_unique_students(
+        cls, entries: list[AttendanceEntryRequest]
+    ) -> list[AttendanceEntryRequest]:
+        student_ids = [entry.student_id for entry in entries]
+        if len(student_ids) != len(set(student_ids)):
+            raise ValueError("Each student may appear only once in an attendance batch")
+        return entries
+
 
 class AttendanceUpdateRequest(BaseModel):
     """Request to update a single attendance record"""

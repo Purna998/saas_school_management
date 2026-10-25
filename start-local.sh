@@ -1,91 +1,70 @@
-#!/bin/bash
-# Nepal SMS - Quick Start Script for Local Development
+#!/usr/bin/env bash
+set -euo pipefail
 
-set -e
-
-echo "======================================"
-echo "Nepal SMS - Local Development Setup"
-echo "======================================"
-echo ""
-
-# Colors
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-RED='\033[0;31m'
-NC='\033[0m' # No Color
-
-# Check if Docker is running
-if ! docker info > /dev/null 2>&1; then
-    echo -e "${RED}✗ Docker is not running. Please start Docker Desktop.${NC}"
-    exit 1
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BACKEND_DIR="$ROOT_DIR/backend"
+FRONTEND_DIR="$ROOT_DIR/frontend"
+PYTHON="$BACKEND_DIR/.venv/bin/python"
+FRONTEND_MODE="dev"
+if [[ "${1:-}" == "preview" ]]; then
+  FRONTEND_MODE="preview"
 fi
 
-echo -e "${GREEN}✓ Docker is running${NC}"
-
-# Check if .env exists
-if [ ! -f .env ]; then
-    echo -e "${YELLOW}! Creating .env from .env.example${NC}"
-    cp .env.example .env
-    echo -e "${GREEN}✓ .env created${NC}"
+if [[ ! -x "$PYTHON" ]]; then
+  echo "[INFO] Creating the backend virtual environment..."
+  python3 -m venv "$BACKEND_DIR/.venv"
 fi
 
-# Check if keys exist
-if [ ! -f keys/private_key.pem ]; then
-    echo -e "${YELLOW}! Generating RSA keys for JWT${NC}"
-    mkdir -p keys
-    openssl genrsa -out keys/private_key.pem 2048
-    openssl rsa -in keys/private_key.pem -pubout -out keys/public_key.pem
-    echo -e "${GREEN}✓ JWT keys generated${NC}"
+if ! "$PYTHON" -m pip --version >/dev/null 2>&1; then
+  "$PYTHON" -m ensurepip --upgrade
 fi
 
-echo ""
-echo "Step 1: Starting Infrastructure (PostgreSQL + Redis)"
-echo "-------------------------------------------------------"
-docker-compose up -d postgres redis
+if ! "$PYTHON" -c "import fastapi, sqlalchemy, redis, asyncpg, pydantic_settings, jwt, pyotp, qrcode" >/dev/null 2>&1; then
+  echo "[INFO] Installing backend dependencies..."
+  "$PYTHON" -m pip install -r "$BACKEND_DIR/requirements-local.txt"
+fi
 
-echo ""
-echo "Waiting for services to be healthy..."
-sleep 10
+if [[ ! -d "$FRONTEND_DIR/node_modules" ]]; then
+  echo "[INFO] Installing frontend dependencies..."
+  npm --prefix "$FRONTEND_DIR" install
+fi
 
-echo ""
-echo "Step 2: Setting up Database"
-echo "-------------------------------------------------------"
-docker-compose run --rm backend python scripts/setup_database.py || {
-    echo -e "${YELLOW}! Database setup failed or already completed${NC}"
+if [[ ! -f "$ROOT_DIR/.env" ]]; then
+  cp "$ROOT_DIR/.env.example" "$ROOT_DIR/.env"
+  echo "[INFO] Created .env from .env.example"
+fi
+
+if [[ ! -f "$ROOT_DIR/keys/jwt_private.pem" ]]; then
+  (cd "$BACKEND_DIR" && "$PYTHON" scripts/generate_jwt_keys.py)
+fi
+
+echo "[INFO] Preparing the local PostgreSQL database..."
+(cd "$BACKEND_DIR" && "$PYTHON" scripts/setup_database.py) || {
+  echo "[ERROR] Database setup failed. Ensure local PostgreSQL is running and .env has the correct credentials."
+  exit 1
 }
 
-echo ""
-echo "Step 3: Starting Backend Services"
-echo "-------------------------------------------------------"
-docker-compose up -d auth-service tenant-service student-service academic-service calendar-service
+declare -a CHILD_PIDS=()
 
-echo ""
-echo "Waiting for services to start..."
-sleep 5
+cleanup() {
+  trap - INT TERM EXIT
+  if ((${#CHILD_PIDS[@]})); then
+    kill "${CHILD_PIDS[@]}" 2>/dev/null || true
+    wait "${CHILD_PIDS[@]}" 2>/dev/null || true
+  fi
+}
+trap cleanup INT TERM EXIT
 
-echo ""
-echo "======================================"
-echo "✓ Backend Services Started!"
-echo "======================================"
-echo ""
-echo "Backend Services:"
-echo "  - Auth Service:     http://localhost:8001/docs"
-echo "  - Tenant Service:   http://localhost:8002/docs"
-echo "  - Student Service:  http://localhost:8003/docs"
-echo "  - Academic Service: http://localhost:8004/docs"
-echo "  - Calendar Service: http://localhost:8016/docs"
-echo ""
-echo "Database:"
-echo "  - PostgreSQL: localhost:5432"
-echo "  - Redis:      localhost:6379"
-echo ""
-echo "======================================"
-echo "Now start the Frontend:"
-echo "  cd frontend"
-echo "  npm install"
-echo "  npm run dev"
-echo "======================================"
-echo ""
-echo "View logs: docker-compose logs -f auth-service"
-echo "Stop services: docker-compose down"
-echo ""
+(cd "$BACKEND_DIR" && exec "$PYTHON" -m uvicorn main:app --reload --port 8080) &
+CHILD_PIDS+=("$!")
+
+(cd "$FRONTEND_DIR" && exec npm run "$FRONTEND_MODE") &
+CHILD_PIDS+=("$!")
+
+echo "[OK] Local applications are starting."
+echo "Frontend: http://localhost:3001"
+echo "API docs: http://localhost:8080/docs"
+echo "Frontend mode: $FRONTEND_MODE (use ./start-local.sh preview for performance checks)"
+echo "Press Ctrl+C to stop both applications."
+
+wait

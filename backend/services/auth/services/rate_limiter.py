@@ -1,11 +1,9 @@
 """
 Nepal School Management System - Rate Limiter
-Redis-based rate limiting for login attempts and API calls
+Redis-based protection against repeated failed login attempts.
 """
 
 import logging
-from typing import Optional
-from datetime import datetime, timedelta
 
 from shared.config.settings import settings
 from shared.utils.redis_client import (
@@ -19,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 
 class RateLimiter:
-    """Rate limiting service using Redis"""
+    """Login protection using short-lived authentication counters in Redis."""
 
     @staticmethod
     async def check_login_attempts(identifier: str) -> bool:
@@ -85,38 +83,6 @@ class RateLimiter:
         """
         key = f"login:attempts:{identifier}"
         await reset_rate_limit(key)
-
-    @staticmethod
-    async def check_api_rate_limit(
-        user_id: str,
-        endpoint: str,
-        limit_per_minute: Optional[int] = None
-    ) -> bool:
-        """
-        Check API rate limit for a user endpoint.
-
-        Args:
-            user_id: User ID
-            endpoint: API endpoint path
-            limit_per_minute: Rate limit (default from settings)
-
-        Returns:
-            True if allowed, False if rate limited
-        """
-        if limit_per_minute is None:
-            limit_per_minute = settings.rate_limit_per_minute
-
-        key = f"api:ratelimit:{user_id}:{endpoint}"
-        count = await increment_rate_limit(key, 60)  # 1-minute window
-
-        if count > limit_per_minute:
-            logger.warning(
-                f"Rate limit exceeded for user {user_id} on {endpoint}: "
-                f"{count}/{limit_per_minute} per minute"
-            )
-            return False
-
-        return True
 
     @staticmethod
     async def get_remaining_attempts(identifier: str) -> int:

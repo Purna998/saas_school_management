@@ -3,19 +3,16 @@ Nepal School Management System - Users API Routes
 User profile management endpoints
 """
 
-import asyncio
-import uuid
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
+from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from shared.database.base import get_db
 from shared.config.settings import settings
 from shared.schemas.responses import success_response, error_response
+from shared.storage import local_storage
 from shared.utils.exceptions import (
     InvalidCredentialsError,
-    InvalidFileTypeError,
-    FileSizeExceededError,
-    NepalSMSException,
 )
 from services.auth.dependencies.auth import get_current_active_user
 from services.auth.models.user import User
@@ -75,7 +72,7 @@ async def get_current_user(
             updated_at=user.updated_at,
         )
 
-    except Exception as e:
+    except Exception:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=error_response("Failed to get user profile", "USER_FETCH_ERROR"),
@@ -131,7 +128,7 @@ async def update_current_user(
             updated_at=updated_user.updated_at,
         )
 
-    except Exception as e:
+    except Exception:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=error_response("Failed to update user profile", "USER_UPDATE_ERROR"),
@@ -178,7 +175,7 @@ async def change_password(
             detail=error_response(str(e), "INVALID_NEW_PASSWORD"),
         )
 
-    except Exception as e:
+    except Exception:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=error_response("Failed to change password", "PASSWORD_CHANGE_ERROR"),
@@ -195,7 +192,7 @@ async def upload_profile_photo(
     Upload profile photo.
 
     Accepts JPEG and PNG files up to 10MB.
-    Stores locally in development, S3 in production.
+    Stores the file in the configured private VPS upload directory.
 
     Status Codes:
         - 200: Photo uploaded
@@ -232,49 +229,38 @@ async def upload_profile_photo(
             ),
         )
 
-    # Generate unique filename
-    ext = file.filename.rsplit(".", 1)[-1] if file.filename and "." in file.filename else "jpg"
-    filename = f"photos/users/{current_user.id}/{uuid.uuid4().hex}.{ext}"
-
-    if settings.s3_bucket_name and not settings.is_development:
-        # Production: Upload to S3
-        def upload_to_s3() -> None:
-            import boto3
-            s3_client = boto3.client(
-                "s3",
-                region_name=settings.aws_region,
-                aws_access_key_id=settings.aws_access_key_id,
-                aws_secret_access_key=settings.aws_secret_access_key,
-            )
-            s3_client.put_object(
-                Bucket=settings.s3_bucket_name,
-                Key=filename,
-                Body=contents,
-                ContentType=file.content_type,
-            )
-
-        await asyncio.to_thread(upload_to_s3)
-
-        if settings.cloudfront_domain:
-            photo_url = f"https://{settings.cloudfront_domain}/{filename}"
-        else:
-            photo_url = f"https://{settings.s3_bucket_name}.s3.{settings.aws_region}.amazonaws.com/{filename}"
-    else:
-        # Development: Store locally
-        import os
-        upload_dir = os.path.join("uploads", "photos", "users", str(current_user.id))
-        local_path = os.path.join(upload_dir, f"{uuid.uuid4().hex}.{ext}")
-        def write_local_file() -> None:
-            os.makedirs(upload_dir, exist_ok=True)
-            with open(local_path, "wb") as destination:
-                destination.write(contents)
-
-        await asyncio.to_thread(write_local_file)
-
-        photo_url = f"/uploads/{local_path.replace(os.sep, '/')}"
+    filename = await local_storage.save_user_photo(
+        current_user.id,
+        contents,
+        file.content_type,
+    )
+    photo_path = f"/api/v1/users/me/photo/{filename}"
+    photo_url = f"{settings.public_api_url.rstrip('/')}{photo_path}"
 
     # Update user profile
     user_service = UserService(db)
     await user_service.update_photo(current_user.id, photo_url)
 
     return UploadPhotoResponse(photo_url=photo_url)
+
+
+@router.get("/me/photo/{filename}", response_class=FileResponse)
+async def get_profile_photo(
+    filename: str,
+    current_user: User = Depends(get_current_active_user),
+):
+    """Return only the authenticated user's current profile photo."""
+    expected_url = f"{settings.public_api_url.rstrip('/')}/api/v1/users/me/photo/{filename}"
+    if current_user.photo_url != expected_url:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Photo not found")
+
+    try:
+        path = local_storage.user_photo_path(current_user.id, filename)
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Photo not found")
+
+    if not path.is_file():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Photo not found")
+
+    media_type = "image/png" if path.suffix.lower() == ".png" else "image/jpeg"
+    return FileResponse(path, media_type=media_type)

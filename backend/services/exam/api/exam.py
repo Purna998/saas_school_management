@@ -18,6 +18,7 @@ from services.auth.dependencies.auth import (
 from services.auth.models.user import User
 from services.exam.schemas.exam import (
     ExamCreate,
+    ExamUpdate,
     ExamStatusUpdate,
     ExamResponse,
     ExamListResponse,
@@ -78,6 +79,7 @@ def _mark_to_response(mark) -> MarkResponse:
         exam_subject_id=mark.exam_subject_id,
         student_id=mark.student_id,
         marks_obtained=mark.marks_obtained,
+        is_absent=mark.is_absent,
         grade_point=mark.grade_point,
         remarks=mark.remarks,
         entered_by=mark.entered_by,
@@ -208,6 +210,44 @@ async def get_exam(
         )
 
 
+@router.patch("/{exam_id}")
+async def update_exam(
+    exam_id: uuid.UUID,
+    exam_data: ExamUpdate,
+    current_user: User = Depends(require_permission("exam:update")),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        exam = await ExamService(db).update_exam(
+            exam_id, exam_data, current_user.school_id
+        )
+        return success_response(data=_exam_to_response(exam).model_dump(mode="json"))
+    except RecordNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=error_response(str(exc), "EXAM_NOT_FOUND"),
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=error_response(str(exc), "VALIDATION_ERROR"),
+        ) from exc
+
+
+@router.delete("/{exam_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_exam(
+    exam_id: uuid.UUID,
+    current_user: User = Depends(require_permission("exam:delete")),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        await ExamService(db).delete_exam(exam_id, current_user.school_id)
+    except RecordNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=error_response(str(exc), "EXAM_NOT_FOUND")) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=error_response(str(exc), "DELETE_NOT_ALLOWED")) from exc
+
+
 @router.patch("/{exam_id}/status")
 async def update_exam_status(
     exam_id: uuid.UUID,
@@ -251,7 +291,7 @@ async def update_exam_status(
 @router.post("/marks")
 async def enter_marks(
     mark_data: MarkEntryRequest,
-    current_user: User = Depends(require_permission("exam:create")),
+    current_user: User = Depends(require_permission("marks:create")),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -281,17 +321,43 @@ async def enter_marks(
                 "total": len(marks),
             }
         )
-
-    except RecordNotFoundError as e:
+    except RecordNotFoundError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=error_response(str(e), "EXAM_SUBJECT_NOT_FOUND"),
-        )
-    except ValueError as e:
+            detail=error_response(str(exc), "EXAM_SUBJECT_NOT_FOUND"),
+        ) from exc
+    except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=error_response(str(e), "VALIDATION_ERROR"),
+            detail=error_response(str(exc), "VALIDATION_ERROR"),
+        ) from exc
+
+
+@router.get("/marks/subject/{exam_subject_id}")
+async def get_subject_marks(
+    exam_subject_id: uuid.UUID,
+    current_user: User = Depends(require_permission("marks:read")),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        exam_subject, marks = await ExamService(db).get_marks(
+            exam_subject_id, current_user.school_id
         )
+        return success_response(
+            data=MarkListResponse(
+                exam_subject_id=exam_subject.id,
+                subject_id=exam_subject.subject_id,
+                full_marks=exam_subject.full_marks,
+                pass_marks=exam_subject.pass_marks,
+                marks=[_mark_to_response(mark) for mark in marks],
+                total=len(marks),
+            ).model_dump(mode="json")
+        )
+    except RecordNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=error_response(str(exc), "EXAM_SUBJECT_NOT_FOUND"),
+        ) from exc
 
 
 # ============================================================
@@ -482,6 +548,7 @@ async def get_report_card(
                         full_marks=s["full_marks"],
                         pass_marks=s["pass_marks"],
                         marks_obtained=s["marks_obtained"],
+                        is_absent=s["is_absent"],
                         grade_point=s["grade_point"],
                         remarks=s["remarks"],
                     )

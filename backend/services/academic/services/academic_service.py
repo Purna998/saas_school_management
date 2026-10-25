@@ -5,14 +5,13 @@ Academic structure management: grades, sections, subjects, timetable
 
 import uuid
 import logging
-from typing import Optional, List, Tuple
+from typing import Optional, List
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
+from sqlalchemy import select, func, update
 from sqlalchemy.orm import selectinload
 
 from shared.utils.exceptions import (
     RecordNotFoundError,
-    DuplicateRecordError,
     GradeNotFoundError,
     SectionNotFoundError,
     SubjectNotFoundError,
@@ -30,11 +29,16 @@ from services.academic.models.academic import (
 )
 from services.academic.schemas.academic import (
     GradeCreate,
+    GradeUpdate,
     SectionCreate,
+    SectionUpdate,
     SubjectCreate,
+    SubjectUpdate,
     TimetableEntryCreate,
     HSFacultyCreate,
+    HSFacultyUpdate,
     HSStreamCreate,
+    HSStreamUpdate,
 )
 
 logger = logging.getLogger(__name__)
@@ -113,10 +117,31 @@ class AcademicService:
         )
         return result.scalars().all()
 
+    async def update_grade(self, grade_id: uuid.UUID, data: GradeUpdate, school_id: uuid.UUID) -> Grade:
+        grade = await self.get_grade(grade_id, school_id)
+        for field, value in data.model_dump(exclude_unset=True).items():
+            setattr(grade, field, value)
+        if data.grade_number is not None:
+            grade.is_hs = data.grade_number >= 11
+        await self.db.commit()
+        await self.db.refresh(grade)
+        return grade
+
+    async def deactivate_grade(self, grade_id: uuid.UUID, school_id: uuid.UUID) -> None:
+        grade = await self.get_grade(grade_id, school_id)
+        grade.is_active = False
+        await self.db.execute(update(Section).where(Section.grade_id == grade_id, Section.school_id == school_id).values(is_active=False))
+        await self.db.execute(update(Subject).where(Subject.grade_id == grade_id, Subject.school_id == school_id).values(is_active=False))
+        await self.db.commit()
+
     # --- Sections ---
 
     async def create_section(self, data: SectionCreate, school_id: uuid.UUID) -> Section:
-        await self.get_grade(data.grade_id, school_id)
+        grade = await self.get_grade(data.grade_id, school_id)
+        if data.stream_id:
+            if not grade.is_hs:
+                raise ValueError("Streams can only be assigned to Grade 11 or Grade 12 sections")
+            await self.get_stream(data.stream_id, school_id)
         section = Section(
             id=uuid.uuid4(),
             school_id=school_id,
@@ -124,6 +149,7 @@ class AcademicService:
             name=data.name,
             capacity=data.capacity,
             class_teacher_id=data.class_teacher_id,
+            stream_id=data.stream_id,
             is_active=True,
         )
         self.db.add(section)
@@ -148,12 +174,37 @@ class AcademicService:
         )
         return result.scalars().all()
 
+    async def update_section(self, section_id: uuid.UUID, data: SectionUpdate, school_id: uuid.UUID) -> Section:
+        section = await self.get_section(section_id, school_id)
+        fields = data.model_dump(exclude_unset=True)
+        if fields.get("stream_id"):
+            grade = await self.get_grade(section.grade_id, school_id)
+            if not grade.is_hs:
+                raise ValueError("Streams can only be assigned to Grade 11 or Grade 12 sections")
+            await self.get_stream(fields["stream_id"], school_id)
+        for field, value in fields.items():
+            setattr(section, field, value)
+        await self.db.commit()
+        await self.db.refresh(section)
+        return section
+
+    async def deactivate_section(self, section_id: uuid.UUID, school_id: uuid.UUID) -> None:
+        section = await self.get_section(section_id, school_id)
+        section.is_active = False
+        await self.db.commit()
+
     # --- Subjects ---
 
     async def create_subject(self, data: SubjectCreate, school_id: uuid.UUID) -> Subject:
         await self.get_grade(data.grade_id, school_id)
         if data.faculty_id:
             await self.get_faculty(data.faculty_id, school_id)
+        streams = []
+        for stream_id in data.stream_ids:
+            stream = await self.get_stream(stream_id, school_id)
+            if not data.faculty_id or stream.faculty_id != data.faculty_id:
+                raise ValueError("Every selected stream must belong to the selected faculty")
+            streams.append(stream)
         subject = Subject(
             id=uuid.uuid4(),
             school_id=school_id,
@@ -165,8 +216,10 @@ class AcademicService:
             full_marks=data.full_marks,
             pass_marks=data.pass_marks,
             credit_hours=data.credit_hours,
+            optional_group=data.optional_group,
             teacher_id=data.teacher_id,
             faculty_id=data.faculty_id,
+            streams=streams,
             is_active=True,
         )
         self.db.add(subject)
@@ -176,7 +229,7 @@ class AcademicService:
 
     async def get_subject(self, subject_id: uuid.UUID, school_id: uuid.UUID) -> Subject:
         result = await self.db.execute(
-            select(Subject).where(Subject.id == subject_id, Subject.school_id == school_id)
+            select(Subject).where(Subject.id == subject_id, Subject.school_id == school_id).options(selectinload(Subject.streams))
         )
         subject = result.scalar_one_or_none()
         if not subject:
@@ -184,12 +237,40 @@ class AcademicService:
         return subject
 
     async def list_subjects(self, grade_id: uuid.UUID, school_id: uuid.UUID, faculty_id: Optional[uuid.UUID] = None) -> List[Subject]:
-        query = select(Subject).where(Subject.grade_id == grade_id, Subject.school_id == school_id, Subject.is_active == True)
+        query = select(Subject).where(Subject.grade_id == grade_id, Subject.school_id == school_id, Subject.is_active == True).options(selectinload(Subject.streams))
         if faculty_id:
             query = query.where(Subject.faculty_id == faculty_id)
         query = query.order_by(Subject.code)
         result = await self.db.execute(query)
         return result.scalars().all()
+
+    async def update_subject(self, subject_id: uuid.UUID, data: SubjectUpdate, school_id: uuid.UUID) -> Subject:
+        subject = await self.get_subject(subject_id, school_id)
+        fields = data.model_dump(exclude_unset=True)
+        stream_ids = fields.pop("stream_ids", None)
+        if fields.get("faculty_id"):
+            await self.get_faculty(fields["faculty_id"], school_id)
+        if stream_ids is not None:
+            effective_faculty_id = fields.get("faculty_id", subject.faculty_id)
+            streams = []
+            for stream_id in stream_ids:
+                stream = await self.get_stream(stream_id, school_id)
+                if not effective_faculty_id or stream.faculty_id != effective_faculty_id:
+                    raise ValueError("Every selected stream must belong to the selected faculty")
+                streams.append(stream)
+            subject.streams = streams
+        for field, value in fields.items():
+            if field == "subject_type" and value is not None:
+                value = SubjectType(value)
+            setattr(subject, field, value)
+        await self.db.commit()
+        await self.db.refresh(subject)
+        return subject
+
+    async def deactivate_subject(self, subject_id: uuid.UUID, school_id: uuid.UUID) -> None:
+        subject = await self.get_subject(subject_id, school_id)
+        subject.is_active = False
+        await self.db.commit()
 
     # --- Timetable ---
 
@@ -261,6 +342,21 @@ class AcademicService:
         )
         return result.scalars().all()
 
+    async def update_faculty(self, faculty_id: uuid.UUID, data: HSFacultyUpdate, school_id: uuid.UUID) -> HSFaculty:
+        faculty = await self.get_faculty(faculty_id, school_id)
+        for field, value in data.model_dump(exclude_unset=True).items():
+            setattr(faculty, field, value)
+        await self.db.commit()
+        await self.db.refresh(faculty)
+        return faculty
+
+    async def deactivate_faculty(self, faculty_id: uuid.UUID, school_id: uuid.UUID) -> None:
+        faculty = await self.get_faculty(faculty_id, school_id)
+        faculty.is_active = False
+        await self.db.execute(update(HSStream).where(HSStream.faculty_id == faculty_id, HSStream.school_id == school_id).values(is_active=False))
+        await self.db.execute(update(Subject).where(Subject.faculty_id == faculty_id, Subject.school_id == school_id).values(is_active=False))
+        await self.db.commit()
+
     # --- Higher Secondary Streams ---
 
     async def create_stream(self, data: HSStreamCreate, school_id: uuid.UUID) -> HSStream:
@@ -278,3 +374,23 @@ class AcademicService:
         await self.db.commit()
         await self.db.refresh(stream)
         return stream
+
+    async def get_stream(self, stream_id: uuid.UUID, school_id: uuid.UUID) -> HSStream:
+        result = await self.db.execute(select(HSStream).where(HSStream.id == stream_id, HSStream.school_id == school_id))
+        stream = result.scalar_one_or_none()
+        if not stream:
+            raise RecordNotFoundError(f"Stream with ID {stream_id} not found")
+        return stream
+
+    async def update_stream(self, stream_id: uuid.UUID, data: HSStreamUpdate, school_id: uuid.UUID) -> HSStream:
+        stream = await self.get_stream(stream_id, school_id)
+        for field, value in data.model_dump(exclude_unset=True).items():
+            setattr(stream, field, value)
+        await self.db.commit()
+        await self.db.refresh(stream)
+        return stream
+
+    async def deactivate_stream(self, stream_id: uuid.UUID, school_id: uuid.UUID) -> None:
+        stream = await self.get_stream(stream_id, school_id)
+        stream.is_active = False
+        await self.db.commit()

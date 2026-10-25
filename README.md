@@ -1,196 +1,95 @@
-# 🇳🇵 Nepal School Management System (SMS)
+# Nepal School Management System
 
-**FastAPI · Microservices · Multi-Tenant SaaS**
+A modular FastAPI monolith and a Next.js frontend for a multi-tenant school management platform.
 
-विद्यालय व्यवस्थापन प्रणाली — Technical Implementation
-
-## 🎯 Project Overview
-
-Production-grade, multi-tenant SaaS platform serving Nepali schools from ECD through Grade 12, fully compliant with NEB, EMIS, MOE, TSC, and DEO requirements.
-
-### Architecture
-- **Backend**: FastAPI 0.115+ (Python 3.12, Microservices)
-- **Frontend**: Next.js 14 (App Router, TypeScript)
-- **Mobile**: React Native + Expo (Android-first)
-- **Database**: PostgreSQL 16 (RLS multi-tenancy), Redis 7, Elasticsearch 8
-- **Infrastructure**: Docker, Kubernetes, AWS ap-south-1
-
-## 📦 Microservices Architecture
-
-| Service | Port | Responsibility |
-|---------|------|----------------|
-| auth-service | 8001 | JWT, MFA, RBAC, OAuth |
-| tenant-service | 8002 | School onboarding, Grade 11-12 toggle |
-| student-service | 8003 | Enrollment, EMIS, profiles |
-| academic-service | 8004 | Grades, subjects, faculties, streams |
-| attendance-service | 8005 | Daily/period attendance, reports |
-| exam-service | 8006 | Exams, marks, GPA/Percentage engines |
-| fee-service | 8007 | Fee structure, payments, receipts |
-| staff-service | 8008 | Teachers, TSC, payroll |
-| communication-service | 8009 | SMS, email, push notifications |
-| library-service | 8010 | Book catalog, issue/return |
-| transport-service | 8011 | Routes, vehicles, GPS |
-| hostel-service | 8012 | Room allocation, warden |
-| inventory-service | 8013 | Asset register, stock |
-| report-service | 8014 | EMIS, analytics, PDFs |
-| notification-worker | 8015 | Event processing |
-| calendar-service | 8016 | BS/AD conversion, NPT |
-
-## 🚀 Quick Start
+## Local development
 
 ### Prerequisites
-- Python 3.12+
-- Docker & Docker Compose
-- PostgreSQL 16
-- Redis 7
 
-### Development Setup
+- Python 3.13
+- Node.js 20 or newer
+- PostgreSQL 16 running on `localhost:5432`
+- Redis 7 running on `localhost:6379`
+
+Create the PostgreSQL user referenced by `DATABASE_URL` before starting. The default development credentials in `.env.example` are `postgres` / `postgres`; update them for your local installation.
+
+### Quick start
+
+On Windows:
+
+```bat
+start-local.bat
+```
+
+On macOS or Linux:
 
 ```bash
-# Clone repository
-git clone <repo-url>
-cd saas_school_management_system
+chmod +x start-local.sh
+./start-local.sh
+```
 
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
+The launcher creates the Python virtual environment when needed, installs missing dependencies, creates JWT development keys, prepares the database, and starts the frontend plus the API.
 
-# Install dependencies
-pip install -r requirements.txt
+- Frontend: http://localhost:3001
+- API docs: http://localhost:8080/docs
 
-# Start infrastructure
-docker-compose up -d postgres redis
+Local development uses ports 3001 and 8080 so another project can use 3000 and 8000. The frontend proxies `/backend` requests to `BACKEND_URL`, configured in `frontend/.env.local` (see `frontend/.env.example`).
 
-# Run migrations
+Press `Ctrl+C` on macOS/Linux, or close the service command windows on Windows, to stop the servers.
+
+For normal browsing and LCP/performance measurements, run `start-local.bat preview` (Windows) or `./start-local.sh preview` (macOS/Linux). This builds every frontend route before starting the optimized server on port 3001. If the API is already running, use `npm --prefix frontend run preview` instead. Stop the existing frontend on port 3001 before switching modes.
+
+The default development mode compiles routes on demand; the first visit after a restart or code change can include several seconds of compilation in its time to first byte. Use `npm --prefix frontend run dev` for editing with hot reload, and rebuild the preview after changing frontend code. No Redis application cache is needed for the optimized frontend.
+
+### Manual setup
+
+Copy `.env.example` to `.env`, adjust the local database credentials, and then run:
+
+```bash
+python -m venv backend/.venv
+# Windows: backend\.venv\Scripts\activate
+# macOS/Linux: source backend/.venv/bin/activate
+python -m pip install -r backend/requirements-local.txt
+npm --prefix frontend install
+
+cd backend
+python scripts/generate_jwt_keys.py
+python scripts/setup_database.py
+python -m uvicorn main:app --reload --port 8080
+```
+
+In another terminal:
+
+```bash
+npm --prefix frontend run dev
+```
+
+The domain packages under `backend/services/` are internal modules of this one API process. They keep business boundaries without introducing separate deployments.
+
+Redis is reserved for ephemeral authentication state: sessions, revoked tokens, password-reset/email-verification tokens, and failed-login protection. Password hashes, account records, durable session/audit records, and all school data stay in PostgreSQL. Redis is not used for general application caching, ordinary API rate limiting, or job queues.
+
+### Production layout
+
+- Deploy one FastAPI application with PostgreSQL and Redis on the VPS. Deploy Next.js to Vercel and point `NEXT_PUBLIC_API_URL` at the Cloudflare-proxied API domain.
+- Run database schema migrations with `alembic upgrade head` during deployment. The API does not create or alter tables at startup.
+- Set `UPLOAD_DIR` to a private persistent directory outside `public_html`. Uploaded files are served only through authenticated API routes.
+- Keep PostgreSQL close to FastAPI. The conservative default pool is suitable for a small VPS and can be tuned using `DATABASE_POOL_SIZE` and `DATABASE_MAX_OVERFLOW`.
+- Run `npm --prefix frontend run build` for production. The dashboard chart library is split into a deferred chunk and is not part of the initial page code.
+
+Example production processes:
+
+```bash
+cd backend
 alembic upgrade head
-
-# Start services (development)
-./scripts/start-dev.sh
+uvicorn main:app --host 127.0.0.1 --port 8000 --workers 2
 ```
 
-## 🏗️ Project Structure
-
-```
-saas_school_management_system/
-├── services/
-│   ├── auth/                 # Authentication & Authorization
-│   ├── tenant/              # School & Subscription Management
-│   ├── student/             # Student Information System
-│   ├── academic/            # Academic Management + Grade 11-12
-│   ├── attendance/          # Attendance Tracking
-│   ├── exam/               # Examination & Grading
-│   ├── fee/                # Fee Management
-│   ├── staff/              # Staff & Payroll
-│   ├── communication/      # Notifications
-│   ├── library/            # Library Management
-│   ├── transport/          # Transport Management
-│   ├── hostel/             # Hostel Management
-│   ├── inventory/          # Inventory Management
-│   ├── report/             # Reporting & Analytics
-│   ├── notification_worker/ # Event Consumer
-│   └── calendar/           # BS Calendar Service
-├── shared/
-│   ├── database/           # SQLAlchemy models
-│   ├── schemas/            # Pydantic schemas
-│   ├── utils/              # Shared utilities
-│   ├── middleware/         # Common middleware
-│   └── config/             # Configuration
-├── infrastructure/
-│   ├── docker/             # Dockerfiles
-│   ├── kubernetes/         # K8s manifests
-│   └── helm/              # Helm charts
-├── migrations/             # Alembic migrations
-├── tests/                 # Test suites
-├── scripts/               # Utility scripts
-├── docker-compose.yml     # Local development
-└── requirements.txt       # Python dependencies
-```
-
-## 🇳🇵 Nepal-Specific Features
-
-### Grade 11-12 Toggle System
-- **Feature Toggle**: Admin panel button to enable/disable Grade 11-12
-- **Dynamic Tables**: `hs_faculties`, `hs_streams`, `hs_subjects`, `hs_enrollments`
-- **Dual Grading**: GPA (1-10) vs Percentage (11-12)
-- **Faculties**: Science, Management, Humanities, Education, Law
-
-### Bikram Sambat Calendar
-- Primary date system: BS (YYYY-MM-DD)
-- AD dates stored internally, BS computed on read
-- NPT timezone (UTC+5:45)
-- Academic year: Baisakh to Chaitra
-
-### EMIS Integration
-- Annual survey export (JSON/Excel)
-- Student enrollment by grade/gender/caste
-- Dropout tracking with reason codes
-- Teacher data with TSC numbers
-- Attendance aggregation
-
-## 🔐 Security
-
-- **Multi-tenancy**: PostgreSQL Row-Level Security (RLS)
-- **Auth**: JWT RS256, 15-min access + 7-day refresh
-- **MFA**: TOTP for Admin/Accountant roles
-- **Encryption**: TLS 1.3, AES-256 at rest
-- **Compliance**: Nepal Privacy Act 2075, data residency SAARC
-
-## 📊 API Documentation
-
-Each service exposes OpenAPI documentation:
-- Auth: http://localhost:8001/docs
-- Tenant: http://localhost:8002/docs
-- Student: http://localhost:8003/docs
-- [...]
-
-## 🧪 Testing
+## Verification
 
 ```bash
-# Run all tests
-pytest
-
-# Run with coverage
-pytest --cov=services --cov-report=html
-
-# Run specific service tests
-pytest tests/test_auth_service.py
+backend/.venv/Scripts/python -m pytest backend/tests -q
+npm --prefix frontend run lint
+npm --prefix frontend run build
 ```
 
-## 📈 Monitoring
-
-- **Metrics**: Prometheus + Grafana
-- **Tracing**: Jaeger (OpenTelemetry)
-- **Errors**: Sentry
-- **Logs**: ELK Stack
-
-## 🚢 Deployment
-
-### Development
-```bash
-docker-compose up
-```
-
-### Staging/Production
-```bash
-# Build images
-./scripts/build-all.sh
-
-# Deploy to Kubernetes
-kubectl apply -f infrastructure/kubernetes/
-
-# Or use Helm
-helm install nepal-sms infrastructure/helm/nepal-sms
-```
-
-## 📝 License
-
-CONFIDENTIAL - Internal Use Only
-
-## 👥 Team
-
-Engineering & Architecture Team
-Nepal School Management System
-
----
-
-**Status**: 🚧 Active Development | **Version**: 1.0.0-alpha
+On macOS/Linux, use `backend/.venv/bin/python` for the test command.

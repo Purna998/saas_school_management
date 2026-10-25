@@ -1,6 +1,7 @@
 """
-Nepal School Management System - Redis Client
-Redis connection and utility functions
+Nepal School Management System - Authentication Redis Client
+Ephemeral sessions, token revocation, recovery tokens, and login protection.
+Persistent credentials and school records belong in PostgreSQL.
 """
 
 import asyncio
@@ -15,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 
 class RedisClient:
-    """Async Redis client wrapper"""
+    """Async Redis client for authentication state; not application caching."""
 
     def __init__(self):
         self._client: Optional[aioredis.Redis] = None
@@ -113,19 +114,6 @@ class RedisClient:
         json_str = json.dumps(value)
         return await self.set(key, json_str, expire)
 
-    async def keys(self, pattern: str) -> list[str]:
-        """Get keys matching pattern"""
-        client = await self.connect()
-        return await client.keys(pattern)
-
-    async def delete_pattern(self, pattern: str) -> int:
-        """Delete all keys matching pattern"""
-        keys = await self.keys(pattern)
-        if keys:
-            client = await self.connect()
-            return await client.delete(*keys)
-        return 0
-
 
 # Global Redis client instance
 redis_client = RedisClient()
@@ -198,7 +186,7 @@ async def delete_session(session_id: str):
     await redis_client.delete(key)
 
 
-# Rate Limiting Functions
+# Authentication Rate Limiting Functions
 async def increment_rate_limit(key: str, window_seconds: int) -> int:
     """
     Increment rate limit counter.
@@ -238,53 +226,3 @@ async def reset_rate_limit(key: str):
         key: Rate limit key
     """
     await redis_client.delete(key)
-
-
-# Cache Functions
-async def cache_set(key: str, value: str, expire_seconds: int = 3600):
-    """
-    Set cache value.
-
-    Args:
-        key: Cache key
-        value: Value to cache
-        expire_seconds: Cache expiry time in seconds (default 1 hour)
-    """
-    cache_key = f"cache:{key}"
-    await redis_client.set(cache_key, value, expire=expire_seconds)
-
-
-async def cache_get(key: str) -> Optional[str]:
-    """
-    Get cache value.
-
-    Args:
-        key: Cache key
-
-    Returns:
-        Cached value or None if not found
-    """
-    cache_key = f"cache:{key}"
-    return await redis_client.get(cache_key)
-
-
-async def cache_delete(key: str):
-    """
-    Delete cache value.
-
-    Args:
-        key: Cache key
-    """
-    cache_key = f"cache:{key}"
-    await redis_client.delete(cache_key)
-
-
-async def cache_clear_pattern(pattern: str):
-    """
-    Clear all cache keys matching pattern.
-
-    Args:
-        pattern: Pattern to match (e.g., "user:*")
-    """
-    cache_pattern = f"cache:{pattern}"
-    await redis_client.delete_pattern(cache_pattern)

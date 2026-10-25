@@ -29,6 +29,9 @@ class Settings(BaseSettings):
     debug: bool = Field(default=True, description="Debug mode")
     api_version: str = Field(default="v1", description="API version")
     app_name: str = Field(default="Nepal School Management System", description="Application name")
+    app_host: str = Field(default="127.0.0.1", description="API bind address")
+    app_port: int = Field(default=8000, description="API bind port")
+    public_api_url: str = Field(default="http://localhost:8000", description="Public API origin")
     secret_key: str = Field(default="change-this-secret-key", description="Application secret key")
 
     # Database
@@ -43,11 +46,8 @@ class Settings(BaseSettings):
     database_command_timeout_seconds: int = Field(default=30, description="Maximum duration of a database command")
     database_echo: bool = Field(default=False, description="SQLAlchemy echo SQL")
 
-    # Redis
-    redis_url: str = Field(default="redis://localhost:6379/0", description="Redis connection URL")
-    redis_cache_db: int = Field(default=1, description="Redis cache database")
-    redis_session_db: int = Field(default=2, description="Redis session database")
-    redis_queue_db: int = Field(default=3, description="Redis queue database")
+    # Ephemeral authentication and session state only; school data stays in PostgreSQL.
+    redis_url: str = Field(default="redis://localhost:6379/0", description="Authentication/session Redis connection URL")
 
     # JWT Configuration
     jwt_secret_key: str = Field(default="change-this-jwt-secret", description="JWT secret key")
@@ -71,13 +71,6 @@ class Settings(BaseSettings):
 
     # Nepal Timezone
     timezone: str = Field(default="Asia/Kathmandu", description="Nepal timezone (NPT UTC+5:45)")
-
-    # AWS Configuration
-    aws_region: str = Field(default="ap-south-1", description="AWS region (Mumbai - closest to Nepal)")
-    aws_access_key_id: Optional[str] = Field(default=None, description="AWS access key")
-    aws_secret_access_key: Optional[str] = Field(default=None, description="AWS secret key")
-    s3_bucket_name: Optional[str] = Field(default=None, description="S3 bucket name")
-    cloudfront_domain: Optional[str] = Field(default=None, description="CloudFront domain")
 
     # Email (Amazon SES)
     ses_region: str = Field(default="ap-south-1", description="SES region")
@@ -153,11 +146,6 @@ class Settings(BaseSettings):
     jaeger_agent_host: str = Field(default="localhost", description="Jaeger agent host")
     jaeger_agent_port: int = Field(default=6831, description="Jaeger agent port")
 
-    # Rate Limiting
-    rate_limit_enabled: bool = Field(default=True, description="Enable rate limiting")
-    rate_limit_per_minute: int = Field(default=60, description="Rate limit per minute")
-    rate_limit_per_hour: int = Field(default=1000, description="Rate limit per hour")
-
     # Login Security
     max_login_attempts: int = Field(default=5, description="Max login attempts before lockout")
     login_lockout_duration_minutes: int = Field(
@@ -167,6 +155,10 @@ class Settings(BaseSettings):
 
     # File Upload
     max_upload_size_mb: int = Field(default=10, description="Max upload size in MB")
+    upload_dir: Path = Field(
+        default=PROJECT_ROOT / "storage" / "uploads",
+        description="Private directory for uploaded files",
+    )
     allowed_photo_extensions: List[str] = Field(
         default=["jpg", "jpeg", "png"],
         description="Allowed photo extensions"
@@ -179,38 +171,6 @@ class Settings(BaseSettings):
     # Report Generation
     report_temp_dir: str = Field(default="/tmp/nepal_sms_reports", description="Report temp directory")
     report_retention_days: int = Field(default=30, description="Report retention in days")
-
-    # Background Jobs
-    celery_broker_url: str = Field(
-        default="redis://localhost:6379/3",
-        description="Celery broker URL"
-    )
-    celery_result_backend: str = Field(
-        default="redis://localhost:6379/3",
-        description="Celery result backend"
-    )
-    arq_redis_url: str = Field(default="redis://localhost:6379/4", description="ARQ Redis URL")
-
-    # Service Ports (Development)
-    auth_service_port: int = Field(default=8001, description="Auth service port")
-    tenant_service_port: int = Field(default=8002, description="Tenant service port")
-    student_service_port: int = Field(default=8003, description="Student service port")
-    academic_service_port: int = Field(default=8004, description="Academic service port")
-    attendance_service_port: int = Field(default=8005, description="Attendance service port")
-    exam_service_port: int = Field(default=8006, description="Exam service port")
-    fee_service_port: int = Field(default=8007, description="Fee service port")
-    staff_service_port: int = Field(default=8008, description="Staff service port")
-    communication_service_port: int = Field(default=8009, description="Communication service port")
-    library_service_port: int = Field(default=8010, description="Library service port")
-    transport_service_port: int = Field(default=8011, description="Transport service port")
-    hostel_service_port: int = Field(default=8012, description="Hostel service port")
-    inventory_service_port: int = Field(default=8013, description="Inventory service port")
-    report_service_port: int = Field(default=8014, description="Report service port")
-    notification_worker_port: int = Field(default=8015, description="Notification worker port")
-    calendar_service_port: int = Field(default=8016, description="Calendar service port")
-
-    # API Gateway
-    api_gateway_url: str = Field(default="http://localhost:8000", description="API Gateway URL")
 
     # Logging
     log_level: str = Field(default="INFO", description="Log level")
@@ -233,6 +193,11 @@ class Settings(BaseSettings):
             return [ext.strip() for ext in v.split(",")]
         return v
 
+    @field_validator("upload_dir", mode="after")
+    @classmethod
+    def resolve_upload_dir(cls, value: Path) -> Path:
+        return value.resolve() if value.is_absolute() else (PROJECT_ROOT / value).resolve()
+
     @property
     def is_production(self) -> bool:
         """Check if running in production"""
@@ -251,28 +216,3 @@ class Settings(BaseSettings):
 
 # Global settings instance
 settings = Settings()
-
-
-# Service-specific configuration
-class ServiceConfig:
-    """Base configuration for individual services"""
-
-    def __init__(self, service_name: str, service_port: int):
-        self.service_name = service_name
-        self.service_port = service_port
-        self.settings = settings
-
-    @property
-    def service_title(self) -> str:
-        """Get service title for API docs"""
-        return f"{self.service_name.title()} Service - Nepal SMS"
-
-    @property
-    def service_description(self) -> str:
-        """Get service description"""
-        return f"{self.service_name.title()} microservice for Nepal School Management System"
-
-    @property
-    def api_prefix(self) -> str:
-        """Get API prefix"""
-        return f"/api/{settings.api_version}"

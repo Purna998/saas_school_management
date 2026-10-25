@@ -21,6 +21,7 @@ from services.auth.models.role import Role
 from services.auth.utils.password import hash_password
 
 
+
 # Demo school data (mock tenant - actual tenant table will be created later)
 DEMO_SCHOOL_ID = uuid.UUID("12345678-1234-1234-1234-123456789012")
 

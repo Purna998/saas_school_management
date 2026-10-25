@@ -76,7 +76,7 @@ class User(Base, BaseModel, TimestampMixin, TenantMixin):
     photo_url = Column(
         String(500),
         nullable=True,
-        comment="Profile photo URL (S3/CloudFront)"
+        comment="Profile photo API URL"
     )
 
     # Status & Security
