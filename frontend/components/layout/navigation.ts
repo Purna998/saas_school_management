@@ -1,5 +1,5 @@
 import {
-  Activity, BarChart3, BookOpen, Building2, Bus, Calendar, ClipboardCheck,
+  Activity, BarChart3, BookOpen, Building2, Bus, Calendar, ClipboardCheck, MapPin,
   CreditCard, DollarSign, FileText, GraduationCap, Headphones, Home,
   LayoutDashboard, MessageSquare, Package, ServerCog, Settings, UserCog, Users,
 } from 'lucide-react';
@@ -35,10 +35,15 @@ const platformMenu = [
 export function getNavigation(user: User | null) {
   if (user?.role === 'super_admin') return platformMenu;
   const permissions = new Set(user?.permissions ?? []);
-  return schoolMenu.filter((item) => !item.permission || permissions.has(item.permission));
+  const items = schoolMenu.filter((item) => !item.permission || permissions.has(item.permission));
+  if (user?.role === 'parent' || (user?.role !== 'student' && (permissions.has('transport:track') || permissions.has('transport:read') || permissions.has('*:*')))) {
+    items.splice(Math.max(1, items.findIndex((item) => item.href === '/dashboard/transport') + 1), 0, { href: '/dashboard/transport/live', icon: MapPin, label: user?.role === 'parent' ? 'Child’s journey' : 'Live vehicles', group: 'Workspace' });
+  }
+  return items;
 }
 
 export function isNavigationActive(pathname: string, href: string) {
+  if (href === '/dashboard/transport' && pathname.startsWith('/dashboard/transport/live')) return false;
   const overview = href === '/dashboard' || href === '/dashboard/platform';
   return pathname === href || (!overview && pathname.startsWith(`${href}/`));
 }

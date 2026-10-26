@@ -112,3 +112,6 @@ and the implementation direction are in
 Transport fleet/crew, local routes and stops, scheduled seats, dispatch and
 boarding/handover, upkeep, reported positions and fee integration are documented
 in [docs/transport.md](docs/transport.md).
+
+Phone-first live vehicle tracking, private parent journeys, staff maps and HTTPS
+rollout are documented in [docs/live-transport.md](docs/live-transport.md).

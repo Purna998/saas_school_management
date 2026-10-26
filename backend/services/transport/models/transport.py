@@ -259,6 +259,12 @@ class TransportTrip(Base, BaseModel, TimestampMixin, TenantMixin):
             postgresql_where=text("status='in_progress'"),
         ),
         Index("ix_transport_trip_register", "school_id", "date_ad", "status"),
+        Index(
+            "ix_transport_open_tracking",
+            "school_id",
+            "started_at",
+            postgresql_where=text("status='in_progress'"),
+        ),
         CheckConstraint(
             "status IN ('in_progress','completed','cancelled') AND (ended_at IS NULL OR ended_at >= started_at)",
             name="ck_transport_trip",
@@ -282,12 +288,14 @@ class TransportTrip(Base, BaseModel, TimestampMixin, TenantMixin):
     ended_at = Column(DateTime(timezone=True))
     notes = Column(String(1000))
     sweep_confirmed = Column(Boolean, nullable=False, default=False)
+    tracking_progress = Column(JSONB, nullable=False, default=dict)
 
 
 class TransportPassenger(Base, BaseModel, TimestampMixin, TenantMixin):
     __tablename__ = "transport_passengers"
     __table_args__ = (
         Index("uq_transport_trip_student", "trip_id", "student_id", unique=True),
+        Index("ix_transport_family_passenger", "school_id", "student_id", "trip_id"),
         Index(
             "ix_transport_passenger_assignment", "school_id", "assignment_id", "trip_id"
         ),
@@ -318,6 +326,92 @@ class TransportPassenger(Base, BaseModel, TimestampMixin, TenantMixin):
     received_by = Column(String(200))
     notes = Column(String(1000))
     version = Column(Integer, nullable=False, default=1)
+    stop_snapshot = Column(JSONB, nullable=False, default=dict)
+
+
+class TransportFamilyAccess(Base, BaseModel, TimestampMixin, TenantMixin):
+    __tablename__ = "transport_family_access"
+    __table_args__ = (
+        Index(
+            "uq_transport_family_active",
+            "school_id",
+            "student_id",
+            "parent_id",
+            unique=True,
+            postgresql_where=text("revoked_at IS NULL"),
+        ),
+        Index("ix_transport_family_viewer", "school_id", "parent_id", "revoked_at"),
+    )
+    student_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("students.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    parent_id = Column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    created_by = Column(UUID(as_uuid=True), nullable=False)
+    notes = Column(String(1000), nullable=False)
+    revoked_at = Column(DateTime(timezone=True))
+
+
+class TransportPhoneSession(Base, BaseModel, TimestampMixin, TenantMixin):
+    __tablename__ = "transport_phone_sessions"
+    __table_args__ = (
+        Index("uq_transport_phone_token", "token_hash", unique=True),
+        Index(
+            "uq_transport_trip_phone_active",
+            "trip_id",
+            unique=True,
+            postgresql_where=text("revoked_at IS NULL"),
+        ),
+    )
+    trip_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("transport_trips.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    token_hash = Column(String(64), nullable=False)
+    label = Column(String(100), nullable=False)
+    created_by = Column(UUID(as_uuid=True), nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    revoked_at = Column(DateTime(timezone=True))
+
+
+class TransportLivePosition(Base, BaseModel, TimestampMixin, TenantMixin):
+    """One replaceable fix per vehicle, separate from office/audit history."""
+
+    __tablename__ = "transport_live_positions"
+    __table_args__ = (
+        Index("uq_transport_live_vehicle", "vehicle_id", unique=True),
+        Index("ix_transport_live_trip", "school_id", "trip_id"),
+        CheckConstraint(
+            "latitude BETWEEN -90 AND 90 AND longitude BETWEEN -180 AND 180 AND accuracy_m BETWEEN 0 AND 10000 AND (speed_mps IS NULL OR speed_mps BETWEEN 0 AND 60) AND (heading IS NULL OR heading BETWEEN 0 AND 360)",
+            name="ck_transport_live_fix",
+        ),
+    )
+    vehicle_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("vehicles.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    trip_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("transport_trips.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    session_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("transport_phone_sessions.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    latitude = Column(Numeric(10, 7), nullable=False)
+    longitude = Column(Numeric(10, 7), nullable=False)
+    accuracy_m = Column(Numeric(10, 2), nullable=False)
+    speed_mps = Column(Numeric(6, 2))
+    heading = Column(Numeric(6, 2))
+    recorded_at = Column(DateTime(timezone=True), nullable=False)
+    received_at = Column(DateTime(timezone=True), nullable=False)
 
 
 class TransportMaintenance(Base, BaseModel, TimestampMixin, TenantMixin):

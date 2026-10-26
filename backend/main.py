@@ -26,6 +26,7 @@ from services.staff.api import staff
 from services.student.api import students
 from services.tenant.api import tenants
 from services.transport.api import transport
+from services.transport.api import tracking
 from shared.config.settings import settings
 from shared.database.base import close_db, engine
 from shared.performance import install_performance_middleware
@@ -159,6 +160,7 @@ app.include_router(staff.router, prefix=f"{API_PREFIX}/staff", tags=["Staff"])
 app.include_router(communication.router, prefix=f"{API_PREFIX}/communication", tags=["Communication"])
 app.include_router(library.router, prefix=f"{API_PREFIX}/library", tags=["Library"])
 app.include_router(transport.router, prefix=f"{API_PREFIX}/transport", tags=["Transport"])
+app.include_router(tracking.router, prefix=f"{API_PREFIX}/transport", tags=["Live transport"])
 app.include_router(hostel.router, prefix=f"{API_PREFIX}/hostel", tags=["Hostel"])
 app.include_router(inventory.router, prefix=f"{API_PREFIX}/inventory", tags=["Inventory"])
 app.include_router(report.router, prefix=f"{API_PREFIX}/reports", tags=["Reports"])

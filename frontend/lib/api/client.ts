@@ -2,6 +2,7 @@ import type { BillingResult, FeeAward, FeeHead, FeePayment, FeeReceipt, FeeRefun
 import type { LibraryBook, LibraryBorrower, LibraryCopy, LibraryEvent, LibraryLoan, LibraryPolicy, LibraryStats } from './library';
 import type { Hostel, HostelRoom, HostelBed, Resident, HostelStudent, HostelStats, HostelLeave, HostelVisit, RegisterRow, HostelEvent, HostelFeeOptions, HostelBill } from './hostel';
 import type { TransportVehicle,TransportRoute,TransportStop,TransportRun,TransportStudent,TransportAssignment,TransportTrip,TransportPassenger,TransportMaintenance,TransportPosition,TransportStats,TransportEvent,TransportFeeOptions,TransportBill } from './transport';
+import type { FamilyAccess, PhoneGrant, TrackingFeed } from './tracking';
 
 export interface ApiResponse<T = unknown> {
   success: boolean;
@@ -436,6 +437,15 @@ class ApiClient {
     stats: (params?: QueryParams) => this.request<HostelStats>('hostel', { path: '/api/v1/hostel/occupancy', params }),
     history: (params?: QueryParams) => this.request<{ events: HostelEvent[]; total: number }>('hostel', { path: '/api/v1/hostel/history', params }),
     export: (params: QueryParams) => this.request<Blob>('hostel', { path: '/api/v1/hostel/export', params, responseType: 'blob' }),
+  };
+
+  tracking = {
+    live: (page = 1) => this.request<TrackingFeed>('transport', { path: '/api/v1/transport/live', params: { page } }),
+    families: (page = 1) => this.request<{links: FamilyAccess[]; total: number}>('transport', { path: '/api/v1/transport/family-access', params: { page } }),
+    link: (data: unknown) => this.request<Pick<FamilyAccess, 'id' | 'student_name' | 'parent_email' | 'notes'>>('transport', { method: 'POST', path: '/api/v1/transport/family-access', data }),
+    unlink: (id: string, data: unknown) => this.request('transport', { method: 'POST', path: `/api/v1/transport/family-access/${id}/revoke`, data }),
+    issuePhone: (id: string, label: string) => this.request<PhoneGrant>('transport', { method: 'POST', path: `/api/v1/transport/trips/${id}/phone`, data: { label } }),
+    revokePhone: (id: string) => this.request('transport', { method: 'POST', path: `/api/v1/transport/trips/${id}/phone/revoke` }),
   };
 
   transport = {

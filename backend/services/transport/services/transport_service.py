@@ -61,6 +61,18 @@ def fields(row, names):
     return {key: json_value(getattr(row, key)) for key in names.split()}
 
 
+def tracking_stop_snapshot(stop, direction):
+    scheduled = stop.pickup_time if direction == "pickup" else stop.drop_time
+    return {
+        "id": str(stop.id),
+        "name": stop.stop_name,
+        "order": stop.stop_order,
+        "latitude": str(stop.latitude) if stop.latitude is not None else None,
+        "longitude": str(stop.longitude) if stop.longitude is not None else None,
+        "scheduled_time": scheduled.isoformat() if scheduled else None,
+    }
+
+
 class TransportConflict(ValueError):
     pass
 
@@ -801,6 +813,7 @@ class TransportService:
             status="in_progress",
             started_at=now(),
             sweep_confirmed=False,
+            tracking_progress={},
             notes=data.notes,
             snapshot={
                 "run_name": run.name,
@@ -814,6 +827,12 @@ class TransportService:
                 "capacity": vehicle.capacity,
                 "start_time": run.start_time.isoformat(),
                 "end_time": run.end_time.isoformat(),
+                "tracking_stops": list(
+                    {
+                        str(stop.id): tracking_stop_snapshot(stop, run.direction)
+                        for _, stop, _ in rows
+                    }.values()
+                ),
             },
         )
         self.db.add(trip)
@@ -836,6 +855,7 @@ class TransportService:
                     and assignment.requires_handover,
                     status="pending",
                     version=1,
+                    stop_snapshot=tracking_stop_snapshot(stop, run.direction),
                 )
                 for assignment, stop, student in rows
             ]

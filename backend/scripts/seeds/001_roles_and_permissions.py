@@ -210,6 +210,7 @@ DEFAULT_PERMISSIONS = [
     {"code": "staff:attendance:read", "name_en": "View Staff Attendance", "resource": "staff", "action": "attendance_read"},
     {"code": "transport:create", "name_en": "Manage Transport", "resource": "transport", "action": "create"},
     {"code": "transport:read", "name_en": "View Transport", "resource": "transport", "action": "read"},
+    {"code": "transport:track", "name_en": "View live school transport", "resource": "transport", "action": "track"},
     {"code": "transport:delete", "name_en": "Remove Transport Assignments", "resource": "transport", "action": "delete"},
     {"code": "hostel:create", "name_en": "Manage Hostel Rooms", "resource": "hostel", "action": "create"},
     {"code": "hostel:read", "name_en": "View Hostel", "resource": "hostel", "action": "read"},
@@ -243,7 +244,7 @@ ROLE_PERMISSIONS = {
         "staff:leave:create", "staff:leave:approve", "staff:attendance:mark", "staff:attendance:read",
         "academic:create", "academic:read",
         "library:create", "library:read", "library:update", "library:issue", "library:return",
-        "transport:create", "transport:read", "transport:delete",
+        "transport:create", "transport:read", "transport:delete", "transport:track",
         "hostel:create", "hostel:read", "hostel:allocate",
         "inventory:create", "inventory:read", "inventory:update",
         "report:generate", "report:read", "report:delete", "report:export", "report:emis",
@@ -252,6 +253,7 @@ ROLE_PERMISSIONS = {
     ],
 
     "principal": [
+        "transport:track",
         "tenant:read",
         "student:create", "student:read", "student:update", "student:import", "student:export",
         "attendance:read", "attendance:report",
@@ -265,6 +267,7 @@ ROLE_PERMISSIONS = {
     ],
 
     "vice_principal": [
+        "transport:track",
         "tenant:read",
         "student:read", "student:update",
         "attendance:create", "attendance:read", "attendance:update", "attendance:report",
@@ -274,6 +277,7 @@ ROLE_PERMISSIONS = {
     ],
 
     "teacher": [
+        "transport:track",
         "student:read",
         "attendance:create", "attendance:read", "attendance:update",
         "exam:read",
@@ -297,6 +301,7 @@ ROLE_PERMISSIONS = {
     "inventory_manager": ["inventory:create", "inventory:read", "inventory:update"],
 
     "receptionist": [
+        "transport:track",
         "student:read",
         "attendance:read",
     ],

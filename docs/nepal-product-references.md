@@ -60,4 +60,13 @@ The transport pass also reviewed these public pages on 26 October 2026:
 The public descriptions are product references, not proof of statutory fares,
 licensing rules, mandatory service intervals, government approval or independent
 verification of a device location. This release does not copy vendor code or
-interfaces, invent route optimization/ETAs, or claim to deliver parent alerts.
+interfaces or invent route optimization/ETAs. The later phone-first tracking pass
+adds in-page nearby guidance and opt-in supported browser notifications while the
+parent screen is open; it does not claim background push/SMS delivery.
+
+The live-tracking extension also reviewed [OrbitTrack](https://orbitbustrack.com/),
+a Nepal school-bus platform publishing GPS maps, parent/driver views, stop updates
+and BS-calendar workflows. The original implementation here uses explicit trip
+phone consent, verified family links, freshness-labelled maps and nearby-stop
+guidance. OTP boarding, traffic ETA, hardware tracker integration and closed-app
+push remain outside this phone-first release. See [live-transport.md](live-transport.md).

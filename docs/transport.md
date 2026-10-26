@@ -6,6 +6,11 @@ agreements, dispatch, boarding/handover, upkeep, location reports, fee posting a
 activity reports. Nepal references and their feature mapping are in
 [nepal-product-references.md](nepal-product-references.md).
 
+Phone-first live tracking is now a separate minimal parent/staff surface at
+`/dashboard/transport/live`. See [live-transport.md](live-transport.md) for verified
+parent links, one-trip helper phone sharing, maps, nearby guidance and HTTPS setup.
+The office permissions and manual position record below continue to apply.
+
 ## Setup and student agreements
 
 1. **Fleet & crew:** add each vehicle with its actual student passenger capacity,
@@ -116,14 +121,16 @@ The same authenticated endpoint can accept configured device-client reports:
 `POST /api/v1/transport/vehicles/{vehicle_id}/location`, with latitude, longitude,
 capture time, optional accuracy, source and request UUID. A provider needs a
 properly authorized school integration; the current permissions are transport
-office permissions, not per-driver/per-vehicle mobile scopes. No provider API
-credentials, GPS hardware or automatic telemetry connection was supplied here.
+office permissions, not per-driver/per-vehicle mobile scopes. No hardware provider
+API credentials or GPS tracker connection was supplied here. Automatic phone
+sharing uses the separate scoped endpoints in [live-transport.md](live-transport.md).
 Storing a `gps_device_id` does not enable such a feed.
 
 The map link opens the recorded coordinate in OpenStreetMap on user action.
 It does not embed third-party map tiles or transmit positions on page load.
-The system does not infer movement, promise a live bus location, calculate an ETA,
-geofence a child, or send SMS/parent notifications without the relevant integration.
+This office record does not infer movement or calculate an ETA. The separate live
+view embeds a basemap and displays fresh phone fixes plus explicit nearby guidance;
+it does not send SMS or closed-app push notifications.
 
 ## Transport fee integration
 
@@ -158,9 +165,10 @@ office's responsibility. The transport link's uniqueness protects this workflow.
 | `fee:create` plus transport access | Explicitly post/link the agreed monthly transport bill |
 
 Every route also requires transport read access and an authenticated school
-context. Parent/student accounts with read permission alone cannot open private
-registers or vehicle locations. This release is the transport-office workspace,
-not a parent app or dedicated driver portal. Student lookup returns minimal
+context. Parent/student accounts with read permission alone cannot open office
+registers or office vehicle locations. This release is the transport-office
+workspace, with a separate scoped parent live view and helper phone sender.
+Student lookup returns minimal
 identification/class/reference fields, not unrelated contacts, demographics or
 fee profiles.
 
