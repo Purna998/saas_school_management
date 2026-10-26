@@ -108,3 +108,7 @@ Hostel setup, residents, attendance/meals, leave/visitors and fee integration ar
 documented in [docs/hostel.md](docs/hostel.md). Nepal-specific product references
 and the implementation direction are in
 [docs/nepal-product-references.md](docs/nepal-product-references.md).
+
+Transport fleet/crew, local routes and stops, scheduled seats, dispatch and
+boarding/handover, upkeep, reported positions and fee integration are documented
+in [docs/transport.md](docs/transport.md).

@@ -1,6 +1,7 @@
 import type { BillingResult, FeeAward, FeeHead, FeePayment, FeeReceipt, FeeRefund, FeeStatement, FeeStructure, FeeStudent, FeeSummary, OutstandingFees } from './fees';
 import type { LibraryBook, LibraryBorrower, LibraryCopy, LibraryEvent, LibraryLoan, LibraryPolicy, LibraryStats } from './library';
 import type { Hostel, HostelRoom, HostelBed, Resident, HostelStudent, HostelStats, HostelLeave, HostelVisit, RegisterRow, HostelEvent, HostelFeeOptions, HostelBill } from './hostel';
+import type { TransportVehicle,TransportRoute,TransportStop,TransportRun,TransportStudent,TransportAssignment,TransportTrip,TransportPassenger,TransportMaintenance,TransportPosition,TransportStats,TransportEvent,TransportFeeOptions,TransportBill } from './transport';
 
 export interface ApiResponse<T = unknown> {
   success: boolean;
@@ -439,13 +440,46 @@ class ApiClient {
 
   transport = {
     vehicles: {
-      list: () => this.request('transport', { path: '/api/v1/transport/vehicles' }),
-      create: (data: unknown) => this.request('transport', { method: 'POST', path: '/api/v1/transport/vehicles', data }),
+      list: (params?:QueryParams) => this.request<{vehicles:TransportVehicle[];total:number}>('transport', { path: '/api/v1/transport/vehicles',params }),
+      get:(id:string)=>this.request<TransportVehicle>('transport',{path:`/api/v1/transport/vehicles/${id}`}),
+      create: (data: unknown) => this.request<TransportVehicle>('transport', { method: 'POST', path: '/api/v1/transport/vehicles', data }),
+      update:(id:string,data:unknown)=>this.request<TransportVehicle>('transport',{method:'PATCH',path:`/api/v1/transport/vehicles/${id}`,data}),
     },
     routes: {
-      list: () => this.request('transport', { path: '/api/v1/transport/routes' }),
-      create: (data: unknown) => this.request('transport', { method: 'POST', path: '/api/v1/transport/routes', data }),
+      list: (params?:QueryParams) => this.request<{routes:TransportRoute[];total:number}>('transport', { path: '/api/v1/transport/routes',params }),
+      get:(id:string)=>this.request<TransportRoute>('transport',{path:`/api/v1/transport/routes/${id}`}),
+      create: (data: unknown) => this.request<TransportRoute>('transport', { method: 'POST', path: '/api/v1/transport/routes', data }),
+      update:(id:string,data:unknown)=>this.request<TransportRoute>('transport',{method:'PATCH',path:`/api/v1/transport/routes/${id}`,data}),
     },
+    createStop:(id:string,data:unknown)=>this.request<TransportStop>('transport',{method:'POST',path:`/api/v1/transport/routes/${id}/stops`,data}),
+    updateStop:(id:string,data:unknown)=>this.request<TransportStop>('transport',{method:'PATCH',path:`/api/v1/transport/stops/${id}`,data}),
+    reorder:(id:string,data:unknown)=>this.request('transport',{method:'POST',path:`/api/v1/transport/routes/${id}/stop-order`,data}),
+    runs:(params?:QueryParams)=>this.request<{runs:TransportRun[];total:number}>('transport',{path:'/api/v1/transport/runs',params}),
+    run:(id:string)=>this.request<TransportRun>('transport',{path:`/api/v1/transport/runs/${id}`}),
+    createRun:(data:unknown)=>this.request<TransportRun>('transport',{method:'POST',path:'/api/v1/transport/runs',data}),
+    updateRun:(id:string,data:unknown)=>this.request<TransportRun>('transport',{method:'PATCH',path:`/api/v1/transport/runs/${id}`,data}),
+    students:(params?:QueryParams)=>this.request<{students:TransportStudent[];total:number}>('transport',{path:'/api/v1/transport/students',params}),
+    quote:(data:unknown)=>this.request<{monthly_fee:string|null;requires_agreed_price:boolean}>('transport',{method:'POST',path:'/api/v1/transport/quote',data}),
+    assignments:(params?:QueryParams)=>this.request<{assignments:TransportAssignment[];total:number}>('transport',{path:'/api/v1/transport/assignments',params}),
+    assignment:(id:string)=>this.request<TransportAssignment>('transport',{path:`/api/v1/transport/assignments/${id}`}),
+    assign:(data:unknown)=>this.request<TransportAssignment>('transport',{method:'POST',path:'/api/v1/transport/assign',data}),
+    change:(id:string,data:unknown)=>this.request<TransportAssignment>('transport',{method:'POST',path:`/api/v1/transport/assignments/${id}/change`,data}),
+    end:(id:string,data:unknown)=>this.request<TransportAssignment>('transport',{method:'POST',path:`/api/v1/transport/assignments/${id}/end`,data}),
+    trips:(params?:QueryParams)=>this.request<{trips:TransportTrip[];total:number}>('transport',{path:'/api/v1/transport/trips',params}),
+    trip:(id:string,params?:QueryParams)=>this.request<{trip:TransportTrip;passengers:TransportPassenger[];total:number;counts:Record<string,number>}>('transport',{path:`/api/v1/transport/trips/${id}`,params}),
+    startTrip:(data:unknown)=>this.request<TransportTrip>('transport',{method:'POST',path:'/api/v1/transport/trips',data}),
+    passenger:(id:string,data:unknown)=>this.request<TransportPassenger>('transport',{method:'POST',path:`/api/v1/transport/passengers/${id}`,data}),
+    complete:(id:string,data:unknown)=>this.request<TransportTrip>('transport',{method:'POST',path:`/api/v1/transport/trips/${id}/complete`,data}),
+    cancel:(id:string,data:unknown)=>this.request<TransportTrip>('transport',{method:'POST',path:`/api/v1/transport/trips/${id}/cancel`,data}),
+    maintenance:(id:string,params?:QueryParams)=>this.request<{records:TransportMaintenance[];total:number}>('transport',{path:`/api/v1/transport/vehicles/${id}/maintenance`,params}),
+    recordMaintenance:(id:string,data:unknown)=>this.request<TransportMaintenance>('transport',{method:'POST',path:`/api/v1/transport/vehicles/${id}/maintenance`,data}),
+    location:(id:string)=>this.request<{position:TransportPosition|null}>('transport',{path:`/api/v1/transport/vehicles/${id}/location`}),
+    position:(id:string,data:unknown)=>this.request<TransportPosition>('transport',{method:'POST',path:`/api/v1/transport/vehicles/${id}/location`,data}),
+    feeOptions:(id:string,month:string)=>this.request<TransportFeeOptions>('transport',{path:`/api/v1/transport/assignments/${id}/fee-options`,params:{month_bs:month}}),
+    bill:(id:string,data:unknown)=>this.request<TransportBill>('transport',{method:'POST',path:`/api/v1/transport/assignments/${id}/bill`,data}),
+    stats:()=>this.request<TransportStats>('transport',{path:'/api/v1/transport/stats'}),
+    history:(params?:QueryParams)=>this.request<{events:TransportEvent[];total:number}>('transport',{path:'/api/v1/transport/history',params}),
+    export:(params:QueryParams)=>this.request<Blob>('transport',{path:'/api/v1/transport/export',params,responseType:'blob'}),
   };
 
   calendar = {

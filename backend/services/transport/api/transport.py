@@ -1,80 +1,557 @@
-"""
-Nepal School Management System - Transport API Routes
-"""
+"""School-scoped transport office, dispatch, boarding and financial handoff."""
 
-import uuid
-from fastapi import APIRouter, Depends, HTTPException, status
+from datetime import date
+from typing import Literal, Optional
+from uuid import UUID
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-
+from services.auth.dependencies.auth import require_permission
+from services.transport.models.transport import Vehicle, StudentTransport, TransportRun
+from services.transport.schemas.transport import (
+    VehicleCreate,
+    VehicleUpdate,
+    RouteCreate,
+    RouteUpdate,
+    StopCreate,
+    StopUpdate,
+    ReorderStops,
+    RunCreate,
+    RunUpdate,
+    QuoteRequest,
+    StudentTransportAssign,
+    ReasonCommand,
+    StartTrip,
+    PassengerUpdate,
+    CompleteTrip,
+    MaintenanceRequest,
+    PositionRequest,
+    BillRequest,
+    Direction,
+)
+from services.transport.services.transport_service import (
+    TransportService,
+    TransportConflict,
+    today,
+    fields,
+)
 from shared.database.base import get_db
 from shared.schemas.responses import success_response, error_response
 from shared.utils.exceptions import RecordNotFoundError
-from services.auth.dependencies.auth import require_permission
-from services.auth.models.user import User
-from services.transport.schemas.transport import *
-from services.transport.services.transport_service import TransportService
 
 router = APIRouter()
 
 
-@router.post("/vehicles", response_model=VehicleResponse, status_code=201)
-async def create_vehicle(data: VehicleCreate, current_user: User = Depends(require_permission("transport:create")), db: AsyncSession = Depends(get_db)):
+def access(permission="transport:read"):
+    async def check(user=Depends(require_permission(permission))):
+        if not user.school_id or not user.has_permission("transport:read"):
+            raise HTTPException(
+                403,
+                detail=error_response(
+                    "Transport access requires an authorized school account",
+                    "TRANSPORT_SCHOOL_REQUIRED",
+                ),
+            )
+        if (user.has_role("parent") or user.has_role("student")) and not any(
+            user.has_permission(code)
+            for code in ("transport:create", "transport:delete")
+        ):
+            raise HTTPException(
+                403,
+                detail=error_response(
+                    "Student transport and vehicle locations require an authorized transport staff account",
+                    "TRANSPORT_STAFF_REQUIRED",
+                ),
+            )
+        return user
+
+    return check
+
+
+async def run(operation):
+    try:
+        return await operation
+    except RecordNotFoundError as exc:
+        raise HTTPException(
+            404, detail=error_response(str(exc), "TRANSPORT_NOT_FOUND")
+        ) from exc
+    except TransportConflict as exc:
+        raise HTTPException(
+            409, detail=error_response(str(exc), "TRANSPORT_CONFLICT")
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            400, detail=error_response(str(exc), "INVALID_TRANSPORT_REQUEST")
+        ) from exc
+    except IntegrityError as exc:
+        raise HTTPException(
+            409,
+            detail=error_response(
+                "This vehicle, route, run, student assignment or trip conflicts with an existing record. Refresh and review the selection.",
+                "TRANSPORT_CONFLICT",
+            ),
+        ) from exc
+
+
+def result(data):
+    return success_response(data=data)
+
+
+async def command(db, user, action, data, resource=None):
+    return result(
+        await run(
+            TransportService(db).command(
+                action, user.school_id, data, user.id, user.full_name_en, resource
+            )
+        )
+    )
+
+
+@router.get("/vehicles")
+async def vehicles(
+    page: int = Query(1, ge=1),
+    search: Optional[str] = Query(None, max_length=200),
+    is_active: bool = True,
+    user=Depends(access()),
+    db: AsyncSession = Depends(get_db),
+):
+    return result(
+        await run(
+            TransportService(db).vehicles(user.school_id, page, search, is_active)
+        )
+    )
+
+
+@router.get("/vehicles/{vehicle_id}")
+async def vehicle(
+    vehicle_id: UUID, user=Depends(access()), db: AsyncSession = Depends(get_db)
+):
     service = TransportService(db)
-    v = await service.create_vehicle(current_user.school_id, data.model_dump())
-    return VehicleResponse(id=v.id, vehicle_number=v.vehicle_number, vehicle_type=v.vehicle_type.value, capacity=v.capacity, driver_name=v.driver_name, driver_phone=v.driver_phone, driver_license=v.driver_license, is_active=v.is_active)
+    return result(
+        service.vehicle_response(
+            await run(service.get(Vehicle, user.school_id, vehicle_id))
+        )
+    )
 
 
-@router.get("/vehicles", response_model=list[VehicleResponse])
-async def list_vehicles(current_user: User = Depends(require_permission("transport:read")), db: AsyncSession = Depends(get_db)):
+@router.post("/vehicles", status_code=201)
+async def create_vehicle(
+    data: VehicleCreate,
+    user=Depends(access("transport:create")),
+    db: AsyncSession = Depends(get_db),
+):
+    return await command(db, user, "create_vehicle", data)
+
+
+@router.patch("/vehicles/{vehicle_id}")
+async def update_vehicle(
+    vehicle_id: UUID,
+    data: VehicleUpdate,
+    user=Depends(access("transport:create")),
+    db: AsyncSession = Depends(get_db),
+):
+    return await command(db, user, "update_vehicle", data, vehicle_id)
+
+
+@router.get("/vehicles/{vehicle_id}/maintenance")
+async def maintenance(
+    vehicle_id: UUID,
+    page: int = Query(1, ge=1),
+    user=Depends(access()),
+    db: AsyncSession = Depends(get_db),
+):
+    return result(
+        await run(TransportService(db).maintenance(user.school_id, vehicle_id, page))
+    )
+
+
+@router.post("/vehicles/{vehicle_id}/maintenance", status_code=201)
+async def record_maintenance(
+    vehicle_id: UUID,
+    data: MaintenanceRequest,
+    user=Depends(access("transport:create")),
+    db: AsyncSession = Depends(get_db),
+):
+    return await command(db, user, "maintenance", data, vehicle_id)
+
+
+@router.get("/vehicles/{vehicle_id}/location")
+async def location(
+    vehicle_id: UUID, user=Depends(access()), db: AsyncSession = Depends(get_db)
+):
+    return result(await run(TransportService(db).location(user.school_id, vehicle_id)))
+
+
+@router.post("/vehicles/{vehicle_id}/location", status_code=201)
+async def position(
+    vehicle_id: UUID,
+    data: PositionRequest,
+    user=Depends(access("transport:create")),
+    db: AsyncSession = Depends(get_db),
+):
+    return await command(db, user, "position", data, vehicle_id)
+
+
+@router.get("/routes")
+async def routes(
+    page: int = Query(1, ge=1),
+    search: Optional[str] = Query(None, max_length=200),
+    is_active: bool = True,
+    user=Depends(access()),
+    db: AsyncSession = Depends(get_db),
+):
+    return result(
+        await run(TransportService(db).routes(user.school_id, page, search, is_active))
+    )
+
+
+@router.get("/routes/{route_id}")
+async def route(
+    route_id: UUID, user=Depends(access()), db: AsyncSession = Depends(get_db)
+):
+    return result(await run(TransportService(db).route(user.school_id, route_id)))
+
+
+@router.post("/routes", status_code=201)
+async def create_route(
+    data: RouteCreate,
+    user=Depends(access("transport:create")),
+    db: AsyncSession = Depends(get_db),
+):
+    return await command(db, user, "create_route", data)
+
+
+@router.patch("/routes/{route_id}")
+async def update_route(
+    route_id: UUID,
+    data: RouteUpdate,
+    user=Depends(access("transport:create")),
+    db: AsyncSession = Depends(get_db),
+):
+    return await command(db, user, "update_route", data, route_id)
+
+
+@router.post("/routes/{route_id}/stops", status_code=201)
+async def create_stop(
+    route_id: UUID,
+    data: StopCreate,
+    user=Depends(access("transport:create")),
+    db: AsyncSession = Depends(get_db),
+):
+    return await command(db, user, "create_stop", data, route_id)
+
+
+@router.patch("/stops/{stop_id}")
+async def update_stop(
+    stop_id: UUID,
+    data: StopUpdate,
+    user=Depends(access("transport:create")),
+    db: AsyncSession = Depends(get_db),
+):
+    return await command(db, user, "update_stop", data, stop_id)
+
+
+@router.post("/routes/{route_id}/stop-order")
+async def reorder(
+    route_id: UUID,
+    data: ReorderStops,
+    user=Depends(access("transport:create")),
+    db: AsyncSession = Depends(get_db),
+):
+    return await command(db, user, "reorder_stops", data, route_id)
+
+
+@router.get("/runs")
+async def runs(
+    page: int = Query(1, ge=1),
+    search: Optional[str] = Query(None, max_length=200),
+    is_active: bool = True,
+    direction: Optional[Direction] = None,
+    route_id: Optional[UUID] = None,
+    vehicle_id: Optional[UUID] = None,
+    user=Depends(access()),
+    db: AsyncSession = Depends(get_db),
+):
+    return result(
+        await run(
+            TransportService(db).runs(
+                user.school_id, page, search, is_active, direction, route_id, vehicle_id
+            )
+        )
+    )
+
+
+@router.get("/runs/{run_id}")
+async def run_details(
+    run_id: UUID, user=Depends(access()), db: AsyncSession = Depends(get_db)
+):
     service = TransportService(db)
-    vehicles = await service.list_vehicles(current_user.school_id)
-    return [VehicleResponse(id=v.id, vehicle_number=v.vehicle_number, vehicle_type=v.vehicle_type.value, capacity=v.capacity, driver_name=v.driver_name, driver_phone=v.driver_phone, driver_license=v.driver_license, is_active=v.is_active) for v in vehicles]
+    row = await run(service.get(TransportRun, user.school_id, run_id))
+    vehicle = await run(service.get(Vehicle, user.school_id, row.vehicle_id))
+    return result(
+        fields(
+            row,
+            "id name route_id vehicle_id direction start_time end_time weekdays is_active notes",
+        )
+        | {
+            "vehicle_number": vehicle.vehicle_number,
+            "capacity": vehicle.capacity,
+            "route": await run(service.route(user.school_id, row.route_id)),
+        }
+    )
 
 
-@router.post("/routes", response_model=RouteResponse, status_code=201)
-async def create_route(data: RouteCreate, current_user: User = Depends(require_permission("transport:create")), db: AsyncSession = Depends(get_db)):
+@router.post("/runs", status_code=201)
+async def create_run(
+    data: RunCreate,
+    user=Depends(access("transport:create")),
+    db: AsyncSession = Depends(get_db),
+):
+    return await command(db, user, "create_run", data)
+
+
+@router.patch("/runs/{run_id}")
+async def update_run(
+    run_id: UUID,
+    data: RunUpdate,
+    user=Depends(access("transport:create")),
+    db: AsyncSession = Depends(get_db),
+):
+    return await command(db, user, "update_run", data, run_id)
+
+
+@router.get("/students")
+async def students(
+    page: int = Query(1, ge=1),
+    search: Optional[str] = Query(None, max_length=200),
+    user=Depends(access()),
+    db: AsyncSession = Depends(get_db),
+):
+    return result(
+        await run(TransportService(db).students(user.school_id, page, search))
+    )
+
+
+@router.post("/quote")
+async def quote(
+    data: QuoteRequest, user=Depends(access()), db: AsyncSession = Depends(get_db)
+):
+    return result(await run(TransportService(db).quote(user.school_id, data)))
+
+
+@router.get("/assignments")
+async def assignments(
+    page: int = Query(1, ge=1),
+    search: Optional[str] = Query(None, max_length=200),
+    is_active: bool = True,
+    run_id: Optional[UUID] = None,
+    route_id: Optional[UUID] = None,
+    user=Depends(access()),
+    db: AsyncSession = Depends(get_db),
+):
+    return result(
+        await run(
+            TransportService(db).assignments(
+                user.school_id,
+                page,
+                search=search,
+                is_active=is_active,
+                run_id=run_id,
+                route_id=route_id,
+            )
+        )
+    )
+
+
+@router.get("/assignments/{assignment_id}")
+async def assignment(
+    assignment_id: UUID, user=Depends(access()), db: AsyncSession = Depends(get_db)
+):
     service = TransportService(db)
-    route = await service.create_route(current_user.school_id, data.model_dump())
-    route = await service.get_route(route.id, current_user.school_id)
-    return RouteResponse(id=route.id, name=route.name, start_point=route.start_point, end_point=route.end_point, description=route.description, distance_km=float(route.distance_km) if route.distance_km else None, estimated_time_minutes=route.estimated_time_minutes, is_active=route.is_active, stops=[RouteStopResponse(id=s.id, stop_name=s.stop_name, stop_order=s.stop_order, pickup_time=str(s.pickup_time) if s.pickup_time else None, drop_time=str(s.drop_time) if s.drop_time else None, latitude=float(s.latitude) if s.latitude else None, longitude=float(s.longitude) if s.longitude else None) for s in route.stops])
+    return result(
+        service.assignment_response(
+            await run(service.get(StudentTransport, user.school_id, assignment_id))
+        )
+    )
 
 
-@router.get("/routes", response_model=list[RouteResponse])
-async def list_routes(current_user: User = Depends(require_permission("transport:read")), db: AsyncSession = Depends(get_db)):
-    service = TransportService(db)
-    routes = await service.list_routes(current_user.school_id)
-    return [RouteResponse(id=r.id, name=r.name, start_point=r.start_point, end_point=r.end_point, description=r.description, distance_km=float(r.distance_km) if r.distance_km else None, estimated_time_minutes=r.estimated_time_minutes, is_active=r.is_active, stops=[RouteStopResponse(id=s.id, stop_name=s.stop_name, stop_order=s.stop_order, pickup_time=str(s.pickup_time) if s.pickup_time else None, drop_time=str(s.drop_time) if s.drop_time else None, latitude=float(s.latitude) if s.latitude else None, longitude=float(s.longitude) if s.longitude else None) for s in r.stops]) for r in routes]
+@router.post("/assign", status_code=201)
+async def assign(
+    data: StudentTransportAssign,
+    user=Depends(access("transport:create")),
+    db: AsyncSession = Depends(get_db),
+):
+    return await command(db, user, "assign", data)
 
 
-@router.get("/routes/{route_id}", response_model=RouteResponse)
-async def get_route(route_id: uuid.UUID, current_user: User = Depends(require_permission("transport:read")), db: AsyncSession = Depends(get_db)):
-    service = TransportService(db)
-    r = await service.get_route(route_id, current_user.school_id)
-    return RouteResponse(id=r.id, name=r.name, start_point=r.start_point, end_point=r.end_point, description=r.description, distance_km=float(r.distance_km) if r.distance_km else None, estimated_time_minutes=r.estimated_time_minutes, is_active=r.is_active, stops=[RouteStopResponse(id=s.id, stop_name=s.stop_name, stop_order=s.stop_order, pickup_time=str(s.pickup_time) if s.pickup_time else None, drop_time=str(s.drop_time) if s.drop_time else None, latitude=float(s.latitude) if s.latitude else None, longitude=float(s.longitude) if s.longitude else None) for s in r.stops])
+@router.post("/assignments/{assignment_id}/change", status_code=201)
+async def change_assignment(
+    assignment_id: UUID,
+    data: StudentTransportAssign,
+    user=Depends(access("transport:create")),
+    db: AsyncSession = Depends(get_db),
+):
+    if not user.has_permission("transport:delete"):
+        raise HTTPException(
+            403,
+            detail=error_response(
+                "Changing a current assignment also requires permission to end the previous assignment",
+                "TRANSPORT_END_REQUIRED",
+            ),
+        )
+    return await command(db, user, "change_assignment", data, assignment_id)
 
 
-@router.post("/assign", response_model=StudentTransportResponse, status_code=201)
-async def assign_student(data: StudentTransportAssign, current_user: User = Depends(require_permission("transport:create")), db: AsyncSession = Depends(get_db)):
-    service = TransportService(db)
-    a = await service.assign_student(current_user.school_id, data.model_dump())
-    return StudentTransportResponse(id=a.id, student_id=a.student_id, route_id=a.route_id, stop_id=a.stop_id, vehicle_id=a.vehicle_id, transport_type=a.transport_type.value, monthly_fee=a.monthly_fee, is_active=a.is_active)
-
-
+@router.post("/assignments/{assignment_id}/end")
 @router.delete("/assign/{assignment_id}")
-async def remove_assignment(assignment_id: uuid.UUID, current_user: User = Depends(require_permission("transport:delete")), db: AsyncSession = Depends(get_db)):
-    service = TransportService(db)
-    await service.remove_assignment(assignment_id, current_user.school_id)
-    return success_response(data={"message": "Assignment removed"})
+async def end_assignment(
+    assignment_id: UUID,
+    data: ReasonCommand,
+    user=Depends(access("transport:delete")),
+    db: AsyncSession = Depends(get_db),
+):
+    return await command(db, user, "end_assignment", data, assignment_id)
 
 
 @router.get("/routes/{route_id}/students")
-async def get_students_on_route(route_id: uuid.UUID, current_user: User = Depends(require_permission("transport:read")), db: AsyncSession = Depends(get_db)):
-    service = TransportService(db)
-    students = await service.get_students_on_route(route_id, current_user.school_id)
-    return success_response(data={"students": [{"id": str(s.id), "student_id": str(s.student_id), "transport_type": s.transport_type.value} for s in students], "total": len(students)})
+async def route_students(
+    route_id: UUID,
+    page: int = Query(1, ge=1),
+    user=Depends(access()),
+    db: AsyncSession = Depends(get_db),
+):
+    return result(
+        await run(
+            TransportService(db).assignments(user.school_id, page, route_id=route_id)
+        )
+    )
 
 
-@router.get("/stats", response_model=TransportSummaryResponse)
-async def get_stats(current_user: User = Depends(require_permission("transport:read")), db: AsyncSession = Depends(get_db)):
-    service = TransportService(db)
-    return TransportSummaryResponse(**(await service.get_summary(current_user.school_id)))
+@router.get("/trips")
+async def trips(
+    page: int = Query(1, ge=1),
+    date_ad: Optional[date] = None,
+    status: Optional[Literal["in_progress", "completed", "cancelled"]] = None,
+    run_id: Optional[UUID] = None,
+    user=Depends(access()),
+    db: AsyncSession = Depends(get_db),
+):
+    return result(
+        await run(
+            TransportService(db).trips(user.school_id, page, date_ad, status, run_id)
+        )
+    )
+
+
+@router.get("/trips/{trip_id}")
+async def trip(
+    trip_id: UUID,
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=200),
+    user=Depends(access()),
+    db: AsyncSession = Depends(get_db),
+):
+    return result(
+        await run(TransportService(db).trip(user.school_id, trip_id, page, limit))
+    )
+
+
+@router.post("/trips", status_code=201)
+async def start_trip(
+    data: StartTrip,
+    user=Depends(access("transport:create")),
+    db: AsyncSession = Depends(get_db),
+):
+    return await command(db, user, "start_trip", data)
+
+
+@router.post("/passengers/{passenger_id}")
+async def passenger(
+    passenger_id: UUID,
+    data: PassengerUpdate,
+    user=Depends(access("transport:create")),
+    db: AsyncSession = Depends(get_db),
+):
+    return await command(db, user, "passenger", data, passenger_id)
+
+
+@router.post("/trips/{trip_id}/complete")
+async def complete_trip(
+    trip_id: UUID,
+    data: CompleteTrip,
+    user=Depends(access("transport:create")),
+    db: AsyncSession = Depends(get_db),
+):
+    return await command(db, user, "complete_trip", data, trip_id)
+
+
+@router.post("/trips/{trip_id}/cancel")
+async def cancel_trip(
+    trip_id: UUID,
+    data: ReasonCommand,
+    user=Depends(access("transport:create")),
+    db: AsyncSession = Depends(get_db),
+):
+    return await command(db, user, "cancel_trip", data, trip_id)
+
+
+@router.get("/assignments/{assignment_id}/fee-options")
+async def fee_options(
+    assignment_id: UUID,
+    month_bs: str = Query(..., pattern=r"^[0-9]{4}-(0[1-9]|1[0-2])$"),
+    user=Depends(access("fee:create")),
+    db: AsyncSession = Depends(get_db),
+):
+    return result(
+        await run(
+            TransportService(db).fee_options(user.school_id, assignment_id, month_bs)
+        )
+    )
+
+
+@router.post("/assignments/{assignment_id}/bill", status_code=201)
+async def bill(
+    assignment_id: UUID,
+    data: BillRequest,
+    user=Depends(access("fee:create")),
+    db: AsyncSession = Depends(get_db),
+):
+    return await command(db, user, "bill", data, assignment_id)
+
+
+@router.get("/stats")
+async def stats(user=Depends(access()), db: AsyncSession = Depends(get_db)):
+    return result(await run(TransportService(db).stats(user.school_id)))
+
+
+@router.get("/history")
+async def history(
+    page: int = Query(1, ge=1),
+    user=Depends(access()),
+    db: AsyncSession = Depends(get_db),
+):
+    return result(await run(TransportService(db).history(user.school_id, page)))
+
+
+@router.get("/export")
+async def export(
+    report: Literal["assignments", "trip"],
+    search: Optional[str] = Query(None, max_length=200),
+    is_active: bool = True,
+    run_id: Optional[UUID] = None,
+    trip_id: Optional[UUID] = None,
+    user=Depends(access()),
+    db: AsyncSession = Depends(get_db),
+):
+    data = await run(
+        TransportService(db).export(
+            user.school_id, report, search, is_active, run_id, trip_id
+        )
+    )
+    return Response(
+        data,
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="transport-{report}-{today()}.csv"'
+        },
+    )

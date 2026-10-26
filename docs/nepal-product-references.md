@@ -3,8 +3,9 @@
 The product direction is Nepal school administration, from early years through
 Grade 12. The user explicitly requested Nepal-made school-management products as
 references on 26 October 2026. Continue researching relevant Nepal providers when
-adding subsequent modules. Transport implementation is on hold at the user's
-request; this hostel release makes no transport changes.
+adding subsequent modules. Transport was held during the hostel release and was
+subsequently authorized by the user. Its implementation is documented in
+[transport.md](transport.md).
 
 ## Sources reviewed for hostel
 
@@ -45,3 +46,18 @@ legal requirements, government approval or access to their private applications.
 
 The detailed operational scope, constraints and verification are in
 [hostel.md](hostel.md). These references do not imply affiliation with the vendors.
+
+## Sources reviewed for transport
+
+The transport pass also reviewed these public pages on 26 October 2026:
+
+| Reference | Published workflow | Implementation here |
+| --- | --- | --- |
+| [Web Zone inSchoolERP](https://webzonenepal.com/schoolerp/) | Route-wise bus operations, pickup/destination points, transport fee integration and route/student reports. | Ordered route stops, separate pickup/drop runs, student agreements, BS-month fee posting and full-register/manifest exports. Parent alerts and driver payroll remain separate communication/HR integrations. |
+| [A.N. Tech Solution Easy School](https://antechsolution.com.np/easy-school-software) | Route-based prices, driver information, vehicle upkeep, insurance/renewal records and GPS integration. | Route/stop fare configuration, vehicle/driver/helper records, maintenance logs, recorded expiry dates, authenticated position reporting and age-labelled map links. A GPS device reference alone does not establish an automatic feed. |
+| [United Universal School transportation](https://universal.united.edu.np/transportation) | A real Nepal school publishes local route corridors and bus identifiers, distinguishes home-to-school and school-to-home timing, and asks for a receiving adult for junior home drops. | Nepali locality/registration text, NPT schedules in both directions, and a school-configurable adult-handover requirement with the receiving name logged by staff. No vendor schedule, contacts or student records are copied into the school database. |
+
+The public descriptions are product references, not proof of statutory fares,
+licensing rules, mandatory service intervals, government approval or independent
+verification of a device location. This release does not copy vendor code or
+interfaces, invent route optimization/ETAs, or claim to deliver parent alerts.

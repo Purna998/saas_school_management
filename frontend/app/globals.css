@@ -97,6 +97,12 @@
 .pastel-summary > :nth-child(4n+4) { background: #e9faef; border-color: transparent; }
 
 @media print {
+  body:is(:has(#transport-manifest), :has(#transport-agreement)) > :not([data-ui="dialog"]) { display: none !important; }
+  body:is(:has(#transport-manifest), :has(#transport-agreement)) [data-ui="dialog"] { position: static !important; transform: none !important; width: 100% !important; max-width: none !important; max-height: none !important; overflow: visible !important; border: 0 !important; box-shadow: none !important; padding: 0 !important; }
+  body:is(:has(#transport-manifest), :has(#transport-agreement)) [data-ui="dialog"] > :not(#transport-manifest):not(#transport-agreement) { display: none !important; }
+  #transport-manifest, #transport-agreement { color: #000; background: #fff; border: 0; }
+  #transport-manifest thead { display: table-header-group; }
+  #transport-manifest tr, #transport-agreement dl > div { break-inside: avoid; }
   body:has(#hostel-slip) > :not([data-ui="dialog"]) { display: none !important; }
   body:has(#hostel-slip) [data-ui="dialog"] { position: static !important; transform: none !important; width: 100% !important; max-width: none !important; max-height: none !important; overflow: visible !important; border: 0 !important; box-shadow: none !important; padding: 0 !important; }
   body:has(#hostel-slip) [data-ui="dialog"] > :not(#hostel-slip) { display: none !important; }
