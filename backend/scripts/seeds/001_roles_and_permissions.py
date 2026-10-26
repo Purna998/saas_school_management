@@ -267,6 +267,7 @@ ROLE_PERMISSIONS = {
     ],
 
     "vice_principal": [
+        "report:read", "report:export",
         "transport:track",
         "tenant:read",
         "student:read", "student:update",
@@ -286,6 +287,7 @@ ROLE_PERMISSIONS = {
     ],
 
     "accountant": [
+        "report:read", "report:export",
         "student:read",
         "fee:create", "fee:read", "fee:collect", "fee:refund", "fee:report",
         "report:generate",

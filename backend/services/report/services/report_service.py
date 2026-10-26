@@ -1,108 +1,595 @@
-"""Nepal School Management System - Report Service"""
-import asyncio
-import uuid
-import os
-import csv
-import io
-import logging
-from typing import Optional, List, Tuple
-from datetime import datetime
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
-from shared.utils.exceptions import RecordNotFoundError
-from services.report.models.report import Report, ReportType, ReportFormat, ReportStatus
+"""Live previews and immutable snapshots; never serve an arbitrary filesystem path."""
 
-logger = logging.getLogger(__name__)
+import asyncio
+import csv
+import hashlib
+import io
+import json
+from datetime import date, datetime
+from decimal import Decimal, ROUND_HALF_UP
+from uuid import uuid4
+from fastapi import HTTPException
+from sqlalchemy import func, insert, select, text
+from services.report.models.report import (
+    Report,
+    ReportRow,
+    ReportEvent,
+    ReportFormat,
+    ReportStatus,
+)
+from services.report.services.catalog import CATALOG, DEFINITIONS, allowed
+from services.report.services.queries import build, school_today
+from services.student.models.student import Student
+from services.exam.models.exam import Exam
+from services.tenant.models.tenant import Tenant
+from shared.utils.exceptions import RecordNotFoundError
+from shared.utils.nepali_calendar import NepalCalendar, NPT
+
+MAX_ROWS = 10000
+PRINT_ROWS = 2000
+
+
+class ReportConflict(ValueError):
+    pass
+
+
+def digest(value):
+    return hashlib.sha256(
+        json.dumps(
+            value, sort_keys=True, ensure_ascii=False, separators=(",", ":")
+        ).encode()
+    ).hexdigest()
+
+
+def cell(value, kind):
+    if value is None:
+        return None
+    if kind == "integer":
+        return str(int(value))
+    if kind in ("money", "decimal", "percent"):
+        return format(
+            Decimal(str(value)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP), "f"
+        )
+    if kind == "bs_date":
+        return NepalCalendar.ad_to_bs(value)
+    if isinstance(value, datetime):
+        return value.astimezone(NPT).isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, Decimal):
+        return format(value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP), "f")
+    if hasattr(value, "value"):
+        return value.value
+    return str(value)
+
+
+def format_rows(rows, columns):
+    return [
+        {column["key"]: cell(row[column["key"]], column["kind"]) for column in columns}
+        for row in rows
+    ]
+
+
+def summary_values(total, values, source):
+    kinds = {column["key"]: column["kind"] for column in source.columns}
+    return [
+        {
+            "key": "rows",
+            "label": "Matching rows",
+            "kind": "integer",
+            "value": str(total),
+        }
+    ] + [
+        {
+            "key": key,
+            "label": label,
+            "kind": kinds[key],
+            "value": cell(values.get(key, 0) or 0, kinds[key]),
+        }
+        for key, label in source.sums.items()
+    ]
+
+
+def csv_bytes(report, rows):
+    def safe(value):
+        text = "" if value is None else str(value)
+        return (
+            "'" + text
+            if text.lstrip().startswith(("=", "+", "-", "@", "\t", "\r", "\n"))
+            or text.startswith(("\t", "\r", "\n"))
+            else text
+        )
+
+    output = io.StringIO(newline="")
+    writer = csv.writer(output)
+    writer.writerow([column["label"] for column in report.columns])
+    for row in rows:
+        writer.writerow([safe(row.get(column["key"])) for column in report.columns])
+    return ("\ufeff" + output.getvalue()).encode("utf-8")
+
+
+def excel_bytes(report, rows):
+    import xlsxwriter
+
+    output = io.BytesIO()
+    with xlsxwriter.Workbook(
+        output,
+        {"in_memory": True, "strings_to_formulas": False, "strings_to_urls": False},
+    ) as book:
+        header = book.add_format(
+            {"bold": True, "bg_color": "#EDE9FE", "border": 1, "text_wrap": True}
+        )
+        text_format = book.add_format({"num_format": "@", "valign": "top"})
+        sheet = book.add_worksheet("Report")
+        sheet.freeze_panes(1, 0)
+        for index, column in enumerate(report.columns):
+            sheet.write_string(0, index, column["label"], header)
+            sheet.set_column(index, index, 24)
+        for row_index, row in enumerate(rows, 1):
+            for index, column in enumerate(report.columns):
+                value = row.get(column["key"])
+                if value is None:
+                    sheet.write_blank(row_index, index, None)
+                elif column["kind"] == "integer":
+                    sheet.write_number(row_index, index, int(value))
+                else:
+                    sheet.write_string(row_index, index, str(value), text_format)
+        if rows:
+            sheet.autofilter(0, 0, len(rows), len(report.columns) - 1)
+        sheet.repeat_rows(0)
+        sheet.set_landscape()
+        sheet.fit_to_pages(1, 0)
+        info = book.add_worksheet("About this report")
+        info.set_column(0, 0, 28)
+        info.set_column(1, 1, 100)
+        metadata = [
+            ("Title", report.title),
+            ("School", report.school_snapshot.get("name_en", "")),
+            ("School EMIS", report.school_snapshot.get("emis_code", "")),
+            ("Generated NPT", report.generated_at.astimezone(NPT).isoformat()),
+            ("Generated by", report.generated_by_name or ""),
+            ("Snapshot ID", str(report.id)),
+            ("SHA256", report.content_hash),
+            ("Parameters", json.dumps(report.parameters, ensure_ascii=False)),
+            (
+                "NPR / decimal cells",
+                "Exact text preserves paise and identifiers; no formulas are executed.",
+            ),
+        ]
+        metadata += [(item["label"], item["value"]) for item in report.summary] + [
+            ("Scope note", note) for note in report.notes
+        ]
+        for index, (label, value) in enumerate(metadata):
+            info.write_string(index, 0, label, header)
+            info.write_string(index, 1, str(value), text_format)
+    return output.getvalue()
 
 
 class ReportService:
-    def __init__(self, db: AsyncSession):
+    def __init__(self, db):
         self.db = db
 
-    async def generate_report(self, school_id: uuid.UUID, data: dict, generated_by: uuid.UUID) -> Report:
-        report_type = ReportType(data["report_type"])
-        title = f"{report_type.value.replace('_', ' ').title()} Report"
-        if data.get("grade"):
-            title += f" - Grade {data['grade']}"
+    def definition(self, kind, user):
+        definition = CATALOG.get(kind)
+        if definition is None:
+            raise ValueError("Choose a supported report from the catalog")
+        if not allowed(user, definition):
+            raise HTTPException(
+                403, "This report requires its source module permissions"
+            )
+        return definition
 
+    def catalog(self, user):
+        current = NepalCalendar.ad_to_bs(school_today())
+        return {
+            "reports": [
+                {
+                    "key": item.key,
+                    "title": item.title,
+                    "group": item.group,
+                    "description": item.description,
+                    "filters": list(item.filters),
+                    "required": list(item.required),
+                    "statuses": list(item.statuses),
+                    "available": allowed(user, item),
+                }
+                for item in DEFINITIONS
+            ],
+            "today_bs": current,
+            "today_ad": school_today().isoformat(),
+            "max_rows": MAX_ROWS,
+            "print_max_rows": PRINT_ROWS,
+        }
+
+    async def source(self, user, data):
+        definition = self.definition(data.report_type, user)
+        params = data.model_dump(
+            mode="json",
+            exclude_none=True,
+            exclude={"report_type", "request_id", "title", "file_format"},
+        )
+        if set(params) - set(definition.filters):
+            raise ValueError("Remove filters that do not apply to this report")
+        if any(not params.get(key) for key in definition.required):
+            raise ValueError("Complete the required report filters")
+        if data.status and data.status not in definition.statuses:
+            raise ValueError("Choose a valid state for this report")
+        if data.date_from_bs and data.date_to_bs:
+            start, end = (
+                NepalCalendar.bs_to_ad(data.date_from_bs),
+                NepalCalendar.bs_to_ad(data.date_to_bs),
+            )
+            if start > end or (end - start).days > 366:
+                raise ValueError("Choose an ordered date range of at most 366 days")
+        if data.exam_id:
+            exam = await self.db.scalar(
+                select(Exam.id).where(
+                    Exam.id == data.exam_id,
+                    Exam.school_id == user.school_id,
+                    Exam.deleted_at.is_(None),
+                )
+            )
+            if exam is None:
+                raise RecordNotFoundError("Exam", str(data.exam_id))
+        if data.student_id:
+            student = await self.db.scalar(
+                select(Student.id).where(
+                    Student.id == data.student_id,
+                    Student.school_id == user.school_id,
+                    Student.deleted_at.is_(None),
+                    Student.is_deleted.is_(False),
+                )
+            )
+            if student is None:
+                raise RecordNotFoundError("Student", str(data.student_id))
+        return definition, build(user.school_id, data), params
+
+    async def preview(self, user, data, page=1):
+        definition, source, params = await self.source(user, data)
+        table = source.query.order_by(None).subquery()
+        totals = (
+            (
+                await self.db.execute(
+                    select(
+                        func.count().label("rows"),
+                        *[
+                            func.coalesce(func.sum(table.c[key]), 0).label(key)
+                            for key in source.sums
+                        ],
+                    ).select_from(table)
+                )
+            )
+            .mappings()
+            .one()
+        )
+        rows = (
+            (await self.db.execute(source.query.offset((page - 1) * 20).limit(20)))
+            .mappings()
+            .all()
+        )
+        return {
+            "title": definition.title,
+            "columns": source.columns,
+            "rows": format_rows(rows, source.columns),
+            "summary": summary_values(totals["rows"], totals, source),
+            "total": totals["rows"],
+            "page": page,
+            "limit": 20,
+            "parameters": params,
+            "notes": source.notes,
+            "as_at": datetime.now(NPT).isoformat(),
+        }
+
+    def metadata(self, report):
+        return {
+            "id": str(report.id),
+            "report_type": report.report_type,
+            "title": report.title,
+            "parameters": report.parameters,
+            "file_format": report.file_format.value,
+            "status": report.status.value,
+            "generated_at": report.generated_at.isoformat()
+            if report.generated_at
+            else None,
+            "generated_by_name": report.generated_by_name,
+            "created_at": report.created_at.isoformat(),
+            "snapshot_version": report.snapshot_version,
+            "row_count": report.row_count,
+            "columns": report.columns,
+            "summary": report.summary,
+            "notes": report.notes,
+            "school": report.school_snapshot,
+            "content_hash": report.content_hash,
+            "archived_at": report.archived_at.isoformat()
+            if report.archived_at
+            else None,
+            "archive_reason": report.archive_reason,
+            "error_message": report.error_message,
+            "print_available": report.snapshot_version == 2
+            and report.status == ReportStatus.READY
+            and report.row_count <= PRINT_ROWS,
+        }
+
+    async def generate_report(self, user, data):
+        self.definition(data.report_type, user)
+        intent = digest(data.model_dump(mode="json", exclude={"request_id"}))
+        await self.db.execute(
+            text("SELECT pg_advisory_xact_lock(hashtextextended(:key,0))"),
+            {"key": f"report:{user.school_id}:{data.request_id}"},
+        )
+        previous = await self.db.scalar(
+            select(Report).where(
+                Report.school_id == user.school_id, Report.request_id == data.request_id
+            )
+        )
+        if previous:
+            if previous.request_hash != intent:
+                raise ReportConflict(
+                    "This request ID belongs to different report details"
+                )
+            if previous.archived_at:
+                raise ReportConflict(
+                    "This saved report was archived. Generate intentionally with a new request ID."
+                )
+            return self.metadata(previous)
+        definition, source, params = await self.source(user, data)
+        raw = (await self.db.execute(source.query.limit(MAX_ROWS + 1))).mappings().all()
+        if len(raw) > MAX_ROWS:
+            raise ValueError(
+                f"This report exceeds {MAX_ROWS:,} rows. Narrow the filters; no partial report was saved."
+            )
+        rows = await asyncio.to_thread(format_rows, raw, source.columns)
+        sums = {
+            key: sum((Decimal(row[key] or "0") for row in rows), Decimal(0))
+            for key in source.sums
+        }
+        summary = summary_values(len(rows), sums, source)
+        school = (
+            (
+                await self.db.execute(
+                    select(
+                        Tenant.name_en,
+                        Tenant.name_np,
+                        Tenant.emis_code,
+                        Tenant.municipality,
+                        Tenant.district,
+                    ).where(Tenant.id == user.school_id)
+                )
+            )
+            .mappings()
+            .first()
+        )
+        if school is None:
+            raise RecordNotFoundError("School", str(user.school_id))
         report = Report(
-            id=uuid.uuid4(), school_id=school_id, report_type=report_type,
-            title=title, academic_year_bs=data.get("academic_year_bs"),
-            grade=data.get("grade"), section=data.get("section"),
-            generated_by=generated_by, file_format=ReportFormat(data.get("file_format", "csv")),
-            status=ReportStatus.GENERATING, parameters=data.get("filters", {}),
+            id=uuid4(),
+            school_id=user.school_id,
+            request_id=data.request_id,
+            request_hash=intent,
+            report_type=definition.key,
+            title=data.title or definition.title,
+            academic_year_bs=data.academic_year_bs,
+            grade=data.grade,
+            section=data.section,
+            parameters=params,
+            generated_by=user.id,
+            generated_by_name=user.full_name_en,
+            file_format=ReportFormat(data.file_format),
+            status=ReportStatus.READY,
+            generated_at=datetime.now(NPT),
+            snapshot_version=2,
+            row_count=len(rows),
+            columns=source.columns,
+            summary=summary,
+            school_snapshot=dict(school),
+            notes=source.notes,
+            file_url=None,
+        )
+        report.content_hash = digest(
+            {
+                "title": report.title,
+                "parameters": params,
+                "school": dict(school),
+                "columns": source.columns,
+                "summary": summary,
+                "notes": source.notes,
+                "rows": rows,
+            }
         )
         self.db.add(report)
         await self.db.flush()
-
-        try:
-            content = await asyncio.to_thread(self._generate_csv_content, report_type, data)
-            file_path = await asyncio.to_thread(
-                self._save_report_file,
-                report.id,
-                content,
-                report.file_format.value,
+        if rows:
+            await self.db.execute(
+                insert(ReportRow),
+                [
+                    {
+                        "id": uuid4(),
+                        "school_id": user.school_id,
+                        "report_id": report.id,
+                        "ordinal": index,
+                        "values": row,
+                    }
+                    for index, row in enumerate(rows)
+                ],
             )
-            report.file_url = file_path
-            report.status = ReportStatus.READY
-            report.generated_at = datetime.utcnow()
-        except Exception as e:
-            report.status = ReportStatus.FAILED
-            report.error_message = str(e)
-            logger.error(f"Report generation failed: {e}")
+        self.event(user, report, "generated", data.request_id)
+        await self.db.flush()
+        return self.metadata(report)
 
-        await self.db.commit()
-        await self.db.refresh(report)
-        return report
-
-    async def get_report(self, report_id: uuid.UUID, school_id: uuid.UUID) -> Report:
-        result = await self.db.execute(select(Report).where(Report.id == report_id, Report.school_id == school_id))
-        report = result.scalar_one_or_none()
-        if not report:
+    async def get_report(self, user, report_id, lock=False):
+        query = select(Report).where(
+            Report.id == report_id, Report.school_id == user.school_id
+        )
+        if lock:
+            query = query.with_for_update().execution_options(populate_existing=True)
+        report = await self.db.scalar(query)
+        if report is None:
             raise RecordNotFoundError("Report", str(report_id))
+        self.definition(report.report_type, user)
         return report
 
-    async def list_reports(self, school_id: uuid.UUID, page: int = 1, limit: int = 20) -> Tuple[List[Report], int]:
-        query = select(Report).where(Report.school_id == school_id)
-        total = (await self.db.execute(select(func.count()).select_from(query.subquery()))).scalar()
-        query = query.offset((page - 1) * limit).limit(limit).order_by(Report.created_at.desc())
-        reports = (await self.db.execute(query)).scalars().all()
-        return reports, total
+    async def list_reports(self, user, page=1, kind=None, archived=False):
+        kinds = [item.key for item in DEFINITIONS if allowed(user, item)]
+        if kind:
+            self.definition(kind, user)
+            kinds = [kind]
+        query = select(Report).where(
+            Report.school_id == user.school_id,
+            Report.report_type.in_(kinds),
+            Report.archived_at.is_not(None)
+            if archived
+            else Report.archived_at.is_(None),
+        )
+        total = await self.db.scalar(select(func.count()).select_from(query.subquery()))
+        rows = (
+            await self.db.scalars(
+                query.order_by(Report.created_at.desc(), Report.id)
+                .offset((page - 1) * 20)
+                .limit(20)
+            )
+        ).all()
+        return {
+            "reports": [self.metadata(row) for row in rows],
+            "total": total,
+            "page": page,
+            "limit": 20,
+        }
 
-    async def delete_report(self, report_id: uuid.UUID, school_id: uuid.UUID):
-        report = await self.get_report(report_id, school_id)
-        if report.file_url and os.path.exists(report.file_url):
-            await asyncio.to_thread(os.remove, report.file_url)
-        await self.db.delete(report)
-        await self.db.commit()
+    async def detail(self, user, report_id, page=1):
+        report = await self.get_report(user, report_id)
+        rows = (
+            (
+                await self.db.scalars(
+                    select(ReportRow.values)
+                    .where(
+                        ReportRow.report_id == report.id,
+                        ReportRow.school_id == user.school_id,
+                    )
+                    .order_by(ReportRow.ordinal)
+                    .offset((page - 1) * 20)
+                    .limit(20)
+                )
+            ).all()
+            if report.snapshot_version == 2
+            else []
+        )
+        events = (
+            (
+                await self.db.execute(
+                    select(
+                        ReportEvent.action,
+                        ReportEvent.actor_name,
+                        ReportEvent.created_at,
+                        ReportEvent.notes,
+                    )
+                    .where(
+                        ReportEvent.school_id == user.school_id,
+                        ReportEvent.report_id == report.id,
+                    )
+                    .order_by(ReportEvent.created_at.desc(), ReportEvent.id)
+                    .limit(20)
+                )
+            )
+            .mappings()
+            .all()
+        )
+        return {
+            **self.metadata(report),
+            "rows": rows,
+            "page": page,
+            "limit": 20,
+            "events": [
+                {**event, "created_at": event["created_at"].isoformat()}
+                for event in events
+            ],
+        }
 
-    def _generate_csv_content(self, report_type: ReportType, params: dict) -> str:
-        output = io.StringIO()
-        writer = csv.writer(output)
+    async def full_snapshot(self, user, report_id, printing=False):
+        report = await self.get_report(user, report_id)
+        if report.snapshot_version != 2 or report.status != ReportStatus.READY:
+            raise ReportConflict(
+                "This legacy/unverified report has no trusted data snapshot. Generate it again."
+            )
+        if printing and report.row_count > PRINT_ROWS:
+            raise ValueError(
+                f"Print is limited to {PRINT_ROWS:,} rows. Export CSV/Excel or generate a narrower report."
+            )
+        rows = (
+            await self.db.scalars(
+                select(ReportRow.values)
+                .where(
+                    ReportRow.school_id == user.school_id,
+                    ReportRow.report_id == report.id,
+                )
+                .order_by(ReportRow.ordinal)
+                .limit(MAX_ROWS + 1)
+            )
+        ).all()
+        expected = digest(
+            {
+                "title": report.title,
+                "parameters": report.parameters,
+                "school": report.school_snapshot,
+                "columns": report.columns,
+                "summary": report.summary,
+                "notes": report.notes,
+                "rows": rows,
+            }
+        )
+        if len(rows) != report.row_count or expected != report.content_hash:
+            raise ReportConflict(
+                "Snapshot integrity check failed. Contact the school administrator; this report was not exported."
+            )
+        return report, rows
 
-        if report_type == ReportType.STUDENT_LIST:
-            writer.writerow(["Name", "Grade", "Section", "Gender", "Status", "Guardian Phone"])
-            writer.writerow(["Sample Student", params.get("grade", ""), params.get("section", ""), "male", "active", "+977-9841234567"])
-        elif report_type == ReportType.ATTENDANCE_MONTHLY:
-            writer.writerow(["Student Name", "Total Days", "Present", "Absent", "Late", "Attendance %"])
-            writer.writerow(["Sample Student", "22", "20", "1", "1", "90.9%"])
-        elif report_type == ReportType.FEE_COLLECTION:
-            writer.writerow(["Student Name", "Total Due", "Total Paid", "Balance", "Status"])
-            writer.writerow(["Sample Student", "5000", "5000", "0", "paid"])
-        elif report_type == ReportType.EXAM_RESULT:
-            writer.writerow(["Student Name", "Total Marks", "Percentage/GPA", "Rank", "Status"])
-            writer.writerow(["Sample Student", "450", "90%/3.6", "1", "pass"])
-        else:
-            writer.writerow(["Report Type", "Status"])
-            writer.writerow([report_type.value, "Generated"])
+    async def download(self, user, report_id, fmt=None):
+        report, rows = await self.full_snapshot(user, report_id)
+        fmt = fmt or report.file_format.value
+        if fmt not in ("csv", "excel"):
+            raise ValueError("Choose CSV or Excel; use the print view to save PDF")
+        content = await asyncio.to_thread(
+            excel_bytes if fmt == "excel" else csv_bytes, report, rows
+        )
+        self.event(user, report, "downloaded", notes=fmt)
+        await self.db.flush()
+        return content, "xlsx" if fmt == "excel" else "csv"
 
-        return output.getvalue()
+    def event(self, user, report, action, request_id=None, notes=None):
+        self.db.add(
+            ReportEvent(
+                id=uuid4(),
+                school_id=user.school_id,
+                report_id=report.id,
+                request_id=request_id or uuid4(),
+                action=action,
+                actor_id=user.id,
+                actor_name=user.full_name_en,
+                notes=notes,
+            )
+        )
 
-    def _save_report_file(self, report_id: uuid.UUID, content: str, fmt: str) -> str:
-        report_dir = os.path.join("uploads", "reports")
-        os.makedirs(report_dir, exist_ok=True)
-        filename = f"{report_id}.{fmt}"
-        filepath = os.path.join(report_dir, filename)
-        with open(filepath, "w", encoding="utf-8") as f:
-            f.write(content)
-        return filepath
+    async def archive(self, user, report_id, data):
+        report = await self.get_report(user, report_id, True)
+        previous = await self.db.scalar(
+            select(ReportEvent).where(
+                ReportEvent.school_id == user.school_id,
+                ReportEvent.request_id == data.request_id,
+            )
+        )
+        if previous:
+            if (
+                previous.report_id != report.id
+                or previous.action != "archived"
+                or previous.notes != data.notes
+            ):
+                raise ReportConflict(
+                    "This request ID was used for a different report action"
+                )
+            return self.metadata(report)
+        if report.archived_at:
+            raise ReportConflict("This report is already archived")
+        report.archived_at = datetime.now(NPT)
+        report.archive_reason = data.notes
+        self.event(user, report, "archived", data.request_id, data.notes)
+        await self.db.flush()
+        return self.metadata(report)

@@ -3,6 +3,7 @@ import type { LibraryBook, LibraryBorrower, LibraryCopy, LibraryEvent, LibraryLo
 import type { Hostel, HostelRoom, HostelBed, Resident, HostelStudent, HostelStats, HostelLeave, HostelVisit, RegisterRow, HostelEvent, HostelFeeOptions, HostelBill } from './hostel';
 import type { TransportVehicle,TransportRoute,TransportStop,TransportRun,TransportStudent,TransportAssignment,TransportTrip,TransportPassenger,TransportMaintenance,TransportPosition,TransportStats,TransportEvent,TransportFeeOptions,TransportBill } from './transport';
 import type { FamilyAccess, PhoneGrant, TrackingFeed } from './tracking';
+import type { ReportCatalog, ReportFilters, ReportPreview, SavedReport, ReportDetail, ReportStudentOption, ReportExamOption } from './reports';
 
 export interface ApiResponse<T = unknown> {
   success: boolean;
@@ -515,9 +516,16 @@ class ApiClient {
   };
 
   reports = {
-    generate: (reportType: string, params: Record<string, unknown>) =>
-      this.request('report', { method: 'POST', path: '/api/v1/reports/generate', data: { report_type: reportType, ...params } }),
-    list: () => this.request('report', { path: '/api/v1/reports' }),
+    catalog: () => this.request<ReportCatalog>('report', { path: '/api/v1/reports/catalog' }),
+    preview: (data: ReportFilters, page = 1) => this.request<ReportPreview>('report', { method: 'POST', path: '/api/v1/reports/preview', data, params: { page } }),
+    generate: (data: ReportFilters & { request_id: string; title?: string; file_format: 'csv' | 'excel' }) => this.request<SavedReport>('report', { method: 'POST', path: '/api/v1/reports/generate', data }),
+    list: (params?: QueryParams) => this.request<{ reports: SavedReport[]; total: number; page: number; limit: number }>('report', { path: '/api/v1/reports', params }),
+    get: (id: string, page = 1) => this.request<ReportDetail>('report', { path: `/api/v1/reports/${id}`, params: { page } }),
+    print: (id: string) => this.request<ReportDetail>('report', { path: `/api/v1/reports/${id}/print` }),
+    download: (id: string, format: 'csv' | 'excel') => this.request<Blob>('report', { path: `/api/v1/reports/${id}/download`, params: { format }, responseType: 'blob' }),
+    archive: (id: string, data: { request_id: string; notes: string }) => this.request<SavedReport>('report', { method: 'POST', path: `/api/v1/reports/${id}/archive`, data }),
+    students: (search: string, page: number) => this.request<{ items: ReportStudentOption[]; total: number }>('report', { path: '/api/v1/reports/students', params: { search, page } }),
+    exams: (search: string, page: number) => this.request<{ items: ReportExamOption[]; total: number }>('report', { path: '/api/v1/reports/exams', params: { search, page } }),
   };
 }
 

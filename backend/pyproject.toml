@@ -23,6 +23,7 @@ dependencies = [
     "redis[hiredis]>=5.2.1,<6",
     "sqlalchemy[asyncio]==2.0.32",
     "uvicorn[standard]==0.30.6",
+    "xlsxwriter==3.2.9",
 ]
 
 [project.optional-dependencies]

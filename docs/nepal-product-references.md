@@ -70,3 +70,29 @@ and BS-calendar workflows. The original implementation here uses explicit trip
 phone consent, verified family links, freshness-labelled maps and nearby-stop
 guidance. OTP boarding, traffic ETA, hardware tracker integration and closed-app
 push remain outside this phone-first release. See [live-transport.md](live-transport.md).
+
+## Sources reviewed for reporting
+
+The reporting pass reviewed these public descriptions on 26 October 2026:
+
+- [Web Zone inSchoolERP](https://webzonenepal.com/schoolerp/) describes filtered
+  student reports, daily/monthly/yearly attendance reports, result ledgers,
+  financial reports and Excel/PDF export. This implementation uses filtered real
+  records, frozen snapshots, exact fee movement/dues reports, XLSX/CSV and browser
+  print/PDF. It does not claim full double-entry financial statements from a fee
+  ledger alone.
+- [A.N. Tech Solution Easy School](https://antechsolution.com.np/easy-school-software)
+  describes attendance reporting, result analysis, library/hostel analytics and
+  certificates. Here those references guide recorded attendance/results and
+  service registers; a transfer record remains preparation data requiring school
+  review and signing.
+- The official [CEHRD IEMIS support system](https://ess.cehrd.gov.np/) distinguishes
+  school-admin reporting and IEMIS support workflows. A current official upload
+  template was not provided or verified in this session. The EMIS preparation
+  register is explicitly a school review/export aid, with no submission or
+  statutory-conformance claim.
+
+Detailed data definitions, permissions, format choices, migration and verification
+are in [reports.md](reports.md). Vendor descriptions are workflow references, not
+proof of this implementation's capabilities or permission to copy proprietary
+interfaces.

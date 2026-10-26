@@ -97,6 +97,15 @@
 .pastel-summary > :nth-child(4n+4) { background: #e9faef; border-color: transparent; }
 
 @media print {
+  body:has(#school-report-print) > :not([data-ui="dialog"]) { display: none !important; }
+  body:has(#school-report-print) [data-ui="dialog"] { position: static !important; transform: none !important; width: 100% !important; max-width: none !important; max-height: none !important; overflow: visible !important; border: 0 !important; box-shadow: none !important; padding: 0 !important; }
+  body:has(#school-report-print) [data-ui="dialog"] > :not(#school-report-print) { display: none !important; }
+  #school-report-print { color: #000; background: #fff; font-size: 10px; }
+  #school-report-print .overflow-x-auto { overflow: visible !important; border: 0; }
+  #school-report-print table { width: 100%; table-layout: fixed; font-size: 9px; }
+  #school-report-print th, #school-report-print td { min-width: 0; max-width: none; padding: 4px; white-space: normal; overflow-wrap: anywhere; }
+  #school-report-print thead { display: table-header-group; }
+  #school-report-print tr { break-inside: avoid; }
   body:is(:has(#transport-manifest), :has(#transport-agreement)) > :not([data-ui="dialog"]) { display: none !important; }
   body:is(:has(#transport-manifest), :has(#transport-agreement)) [data-ui="dialog"] { position: static !important; transform: none !important; width: 100% !important; max-width: none !important; max-height: none !important; overflow: visible !important; border: 0 !important; box-shadow: none !important; padding: 0 !important; }
   body:is(:has(#transport-manifest), :has(#transport-agreement)) [data-ui="dialog"] > :not(#transport-manifest):not(#transport-agreement) { display: none !important; }

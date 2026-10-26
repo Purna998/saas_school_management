@@ -17,3 +17,4 @@ httpx==0.27.0
 nepali-datetime==1.0.7
 pytz==2024.1
 qrcode[pil]==7.4.2
+xlsxwriter==3.2.9

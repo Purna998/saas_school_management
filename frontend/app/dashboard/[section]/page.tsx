@@ -1,12 +1,11 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { ArrowLeft, BarChart3, Calendar, MessageSquare, Package, Settings } from 'lucide-react';
+import { ArrowLeft, Calendar, MessageSquare, Package, Settings } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
 // Keep unfinished modules in the shared workspace instead of sending users to a 404.
 const sections = {
   inventory: { title: 'Inventory', description: 'Keep track of the resources that keep your school moving.', icon: Package },
-  reports: { title: 'Reports', description: 'Turn your school information into a clearer view of progress.', icon: BarChart3 },
   communication: { title: 'Communication', description: 'Keep your school community informed and connected.', icon: MessageSquare },
   calendar: { title: 'Calendar', description: 'Make room for every class, school event, and important date.', icon: Calendar },
   settings: { title: 'School Settings', description: 'A dedicated space for your school preferences and details.', icon: Settings },

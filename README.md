@@ -115,3 +115,7 @@ in [docs/transport.md](docs/transport.md).
 
 Phone-first live vehicle tracking, private parent journeys, staff maps and HTTPS
 rollout are documented in [docs/live-transport.md](docs/live-transport.md).
+
+School report previews, immutable snapshots, CSV/Excel exports, full print/PDF,
+permissions and Nepal-specific interpretation are documented in
+[docs/reports.md](docs/reports.md).
