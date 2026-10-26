@@ -1,5 +1,6 @@
 import type { BillingResult, FeeAward, FeeHead, FeePayment, FeeReceipt, FeeRefund, FeeStatement, FeeStructure, FeeStudent, FeeSummary, OutstandingFees } from './fees';
 import type { LibraryBook, LibraryBorrower, LibraryCopy, LibraryEvent, LibraryLoan, LibraryPolicy, LibraryStats } from './library';
+import type { Hostel, HostelRoom, HostelBed, Resident, HostelStudent, HostelStats, HostelLeave, HostelVisit, RegisterRow, HostelEvent, HostelFeeOptions, HostelBill } from './hostel';
 
 export interface ApiResponse<T = unknown> {
   success: boolean;
@@ -56,6 +57,7 @@ type ApiModule =
   | 'fee'
   | 'staff'
   | 'library'
+  | 'hostel'
   | 'transport'
   | 'report'
   | 'calendar';
@@ -401,6 +403,38 @@ class ApiClient {
     stats: () => this.request<LibraryStats>('library', { path: '/api/v1/library/stats' }),
     history: (params?: QueryParams) => this.request<{ events: LibraryEvent[]; total: number; page: number; limit: number }>('library', { path: '/api/v1/library/history', params }),
     export: (params: QueryParams) => this.request<Blob>('library', { path: '/api/v1/library/export', params, responseType: 'blob' }),
+  };
+
+  hostel = {
+    get: (id: string) => this.request<Hostel>('hostel', { path: `/api/v1/hostel/hostels/${id}` }),
+    hostels: (params?: QueryParams) => this.request<{ hostels: Hostel[]; total: number }>('hostel', { path: '/api/v1/hostel/hostels', params }),
+    create: (data: unknown) => this.request<Hostel>('hostel', { method: 'POST', path: '/api/v1/hostel/hostels', data }),
+    update: (id: string, data: unknown) => this.request<Hostel>('hostel', { method: 'PATCH', path: `/api/v1/hostel/hostels/${id}`, data }),
+    rooms: (params?: QueryParams) => this.request<{ rooms: HostelRoom[]; total: number }>('hostel', { path: '/api/v1/hostel/rooms', params }),
+    createRoom: (data: unknown) => this.request<HostelRoom>('hostel', { method: 'POST', path: '/api/v1/hostel/rooms', data }),
+    updateRoom: (id: string, data: unknown) => this.request<HostelRoom>('hostel', { method: 'PATCH', path: `/api/v1/hostel/rooms/${id}`, data }),
+    beds: (id: string, params?: QueryParams) => this.request<{ room: HostelRoom; hostel: Hostel; beds: HostelBed[]; total: number }>('hostel', { path: `/api/v1/hostel/rooms/${id}/beds`, params }),
+    addBeds: (id: string, data: unknown) => this.request<HostelRoom>('hostel', { method: 'POST', path: `/api/v1/hostel/rooms/${id}/beds`, data }),
+    updateBed: (id: string, data: unknown) => this.request<HostelBed>('hostel', { method: 'PATCH', path: `/api/v1/hostel/beds/${id}`, data }),
+    students: (params?: QueryParams) => this.request<{ students: HostelStudent[]; total: number }>('hostel', { path: '/api/v1/hostel/students', params }),
+    residents: (params?: QueryParams) => this.request<{ residents: Resident[]; total: number }>('hostel', { path: '/api/v1/hostel/allocations', params }),
+    resident: (id: string) => this.request<Resident>('hostel', { path: `/api/v1/hostel/allocations/${id}` }),
+    allocate: (data: unknown) => this.request<Resident>('hostel', { method: 'POST', path: '/api/v1/hostel/allocate', data }),
+    transfer: (id: string, data: unknown) => this.request<Resident>('hostel', { method: 'POST', path: `/api/v1/hostel/allocations/${id}/transfer`, data }),
+    vacate: (id: string, data: unknown) => this.request<Resident>('hostel', { method: 'POST', path: `/api/v1/hostel/vacate/${id}`, data }),
+    leaves: (params?: QueryParams) => this.request<{ records: HostelLeave[]; total: number }>('hostel', { path: '/api/v1/hostel/leaves', params }),
+    leave: (id: string, data: unknown) => this.request<HostelLeave>('hostel', { method: 'POST', path: `/api/v1/hostel/allocations/${id}/leave`, data }),
+    returnLeave: (id: string, data: unknown) => this.request<HostelLeave>('hostel', { method: 'POST', path: `/api/v1/hostel/leaves/${id}/return`, data }),
+    visits: (params?: QueryParams) => this.request<{ records: HostelVisit[]; total: number }>('hostel', { path: '/api/v1/hostel/visits', params }),
+    visit: (data: unknown) => this.request<HostelVisit>('hostel', { method: 'POST', path: '/api/v1/hostel/visits', data }),
+    depart: (id: string, data: unknown) => this.request<HostelVisit>('hostel', { method: 'POST', path: `/api/v1/hostel/visits/${id}/depart`, data }),
+    register: (params?: QueryParams) => this.request<{ entries: RegisterRow[]; total: number; date_ad: string; date_bs: string; session: string }>('hostel', { path: '/api/v1/hostel/register', params }),
+    saveRegister: (data: unknown) => this.request<{ saved: number }>('hostel', { method: 'POST', path: '/api/v1/hostel/register', data }),
+    feeOptions: (id: string, month: string) => this.request<HostelFeeOptions>('hostel', { path: `/api/v1/hostel/allocations/${id}/fee-options`, params: { month_bs: month } }),
+    bill: (id: string, data: unknown) => this.request<HostelBill>('hostel', { method: 'POST', path: `/api/v1/hostel/allocations/${id}/bill`, data }),
+    stats: (params?: QueryParams) => this.request<HostelStats>('hostel', { path: '/api/v1/hostel/occupancy', params }),
+    history: (params?: QueryParams) => this.request<{ events: HostelEvent[]; total: number }>('hostel', { path: '/api/v1/hostel/history', params }),
+    export: (params: QueryParams) => this.request<Blob>('hostel', { path: '/api/v1/hostel/export', params, responseType: 'blob' }),
   };
 
   transport = {

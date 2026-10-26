@@ -103,3 +103,8 @@ in [docs/fees-and-payments.md](docs/fees-and-payments.md).
 
 The completed library workflow, lending rules, copy inventory, permissions and
 migration are documented in [docs/library.md](docs/library.md).
+
+Hostel setup, residents, attendance/meals, leave/visitors and fee integration are
+documented in [docs/hostel.md](docs/hostel.md). Nepal-specific product references
+and the implementation direction are in
+[docs/nepal-product-references.md](docs/nepal-product-references.md).
